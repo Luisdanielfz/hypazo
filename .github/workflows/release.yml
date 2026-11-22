@@ -14,10 +14,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Dependencias de los tests
+        run: python -m pip install pytest httpx fastapi uvicorn pydantic
+
       - name: Tests
         run: |
-          python -m pip install pytest httpx fastapi uvicorn pydantic
-          python -m pytest tests/piloto/test_install_ps1.py tests/piloto/test_credito.py tests/piloto/test_sesion.py tests/piloto/test_resumen.py tests/piloto/test_revision.py -q
+          python -m pytest tests/piloto/test_install_ps1.py tests/piloto/test_credito.py tests/piloto/test_sesion.py tests/piloto/test_resumen.py tests/piloto/test_revision.py -q -rf *> pytest.txt
+          $codigo = $LASTEXITCODE
+          Get-Content pytest.txt
+          if ($codigo -ne 0) {
+            # Las anotaciones se pueden leer sin iniciar sesión: así se ve por qué falló.
+            Get-Content pytest.txt | Select-Object -Last 25 | ForEach-Object { Write-Host "::error::$_" }
+            exit $codigo
+          }
 
       - name: Inno Setup
         run: |
