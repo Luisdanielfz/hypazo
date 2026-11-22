@@ -1,0 +1,1621 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#04050b">
+<title>Clipeo</title>
+<link rel="preload" href="/assets/fonts/unbounded-latin.woff2" as="font" type="font/woff2" crossorigin>
+<style>
+  @font-face {
+    font-family: "Unbounded"; src: url("/assets/fonts/unbounded-latin.woff2") format("woff2");
+    font-weight: 300 800; font-display: swap;
+  }
+  :root {
+    /* Noche de streaming: se usa a oscuras, junto al directo. Cian y magenta son la aurora;
+       el resto de colores solo dicen estados (ok / cerca / peligro). */
+    --bg: #04050b;
+    --ink: #edf1ff; --muted: #a2abc4; --dim: #7c86a3;
+    --cyan: #3fe9ff; --cyan-ink: #02141a;
+    --magenta: #ff4fd8; --mag-ink: #25031d;
+    --azul: #2b5cff;
+    --ok: #4cf0a0; --warn: #ffcb57; --bad: #ff6b86; --stop: #d42a48;
+    --glass: rgba(16, 20, 38, .58); --glass-hi: rgba(26, 31, 56, .7); --solid: rgba(12, 15, 28, .82);
+    --edge: rgba(255, 255, 255, .09); --edge-hi: rgba(255, 255, 255, .2);
+    --field: rgba(5, 7, 16, .55);
+    --display: "Unbounded", "Segoe UI", system-ui, sans-serif;
+    --body: "Segoe UI", system-ui, -apple-system, sans-serif;
+    --mono: "Cascadia Mono", Consolas, monospace;
+    --r-lg: 22px; --r: 16px; --r-sm: 11px;
+    --sombra: 0 18px 48px -12px rgba(0, 0, 0, .65);
+    --ease: cubic-bezier(.16, 1, .3, 1);
+    --e: .15;                       /* energía del directo (0..1): la aurora la lee */
+  }
+  * { box-sizing: border-box; }
+  html { scrollbar-color: rgba(63, 233, 255, .35) transparent; scrollbar-width: thin; }
+  body { margin: 0; min-height: 100vh; background: var(--bg); color: var(--ink);
+         font: 14.5px/1.5 var(--body); -webkit-font-smoothing: antialiased; caret-color: var(--cyan); }
+  ::selection { background: rgba(255, 79, 216, .38); color: #fff; }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-thumb { background: rgba(63, 233, 255, .28); border-radius: 99px; border: 3px solid transparent; background-clip: padding-box; }
+  ::-webkit-scrollbar-thumb:hover { background-color: rgba(63, 233, 255, .5); }
+  button, input, select { font: inherit; color: inherit; }
+  :focus-visible { outline: 2px solid var(--cyan); outline-offset: 3px; border-radius: 6px; }
+  [hidden] { display: none !important; }
+  .ic { width: 1.15em; height: 1.15em; flex: none; stroke: currentColor; fill: none; stroke-width: 1.9;
+        stroke-linecap: round; stroke-linejoin: round; vertical-align: -0.2em; }
+  .num { font-family: var(--display); font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
+
+  /* ---------- aurora: el pulso del directo detrás del cristal ---------- */
+  .aurora { position: fixed; inset: -25%; z-index: -1; pointer-events: none; filter: blur(90px) saturate(135%);
+            opacity: calc(.32 + var(--e) * .55); transform: scale(calc(1 + var(--e) * .14));
+            transition: opacity 1.4s var(--ease), transform 1.4s var(--ease); }
+  .aurora i { position: absolute; border-radius: 50%; will-change: transform; }
+  .aurora .a1 { width: 52vmax; height: 52vmax; left: 8%; top: 4%; background: radial-gradient(circle, rgba(63,233,255,.75), transparent 62%);
+                animation: deriva1 34s ease-in-out infinite alternate; }
+  .aurora .a2 { width: 58vmax; height: 58vmax; right: 2%; top: 18%; background: radial-gradient(circle, rgba(255,79,216,.62), transparent 62%);
+                animation: deriva2 41s ease-in-out infinite alternate; }
+  .aurora .a3 { width: 46vmax; height: 46vmax; left: 30%; bottom: -4%; background: radial-gradient(circle, rgba(43,92,255,.7), transparent 64%);
+                animation: deriva3 29s ease-in-out infinite alternate; }
+  @keyframes deriva1 { to { transform: translate(18vw, 12vh) scale(1.18); } }
+  @keyframes deriva2 { to { transform: translate(-16vw, -10vh) scale(.88); } }
+  @keyframes deriva3 { to { transform: translate(-12vw, -18vh) scale(1.22); } }
+  .grano { position: fixed; inset: 0; z-index: -1; pointer-events: none; opacity: .07; mix-blend-mode: overlay;
+           background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"); }
+  /* Clip cazado: un barrido de luz cruza la aurora una vez. */
+  .barrido { position: fixed; inset: 0; z-index: -1; pointer-events: none; opacity: 0;
+             background: linear-gradient(105deg, transparent 30%, rgba(63,233,255,.22) 45%, rgba(255,79,216,.28) 55%, transparent 70%);
+             background-size: 250% 100%; }
+  .barrido.ya { animation: barrer 1.6s var(--ease); }
+  @keyframes barrer { 0% { opacity: 1; background-position: 120% 0; } 100% { opacity: 0; background-position: -60% 0; } }
+
+  /* ---------- cristal ---------- */
+  .glass { position: relative; background: var(--glass); border: 1px solid var(--edge); border-radius: var(--r-lg);
+           -webkit-backdrop-filter: blur(22px) saturate(150%); backdrop-filter: blur(22px) saturate(150%);
+           box-shadow: var(--sombra), inset 0 1px 0 rgba(255,255,255,.07); isolation: isolate; }
+  /* brillo que sigue al ratón sobre el panel */
+  .glass::before { content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; z-index: -1; opacity: 0;
+                   background: radial-gradient(420px circle at var(--mx, 50%) var(--my, 0%), rgba(63,233,255,.09), transparent 60%);
+                   transition: opacity .4s var(--ease); }
+  .glass:hover::before { opacity: 1; }
+
+  /* ---------- cabecera ---------- */
+  header { position: sticky; top: 12px; z-index: 20; margin: 12px auto 0; max-width: 1500px; width: calc(100% - 48px);
+           display: flex; align-items: center; gap: 28px; height: 64px; padding: 0 12px 0 20px; border-radius: 20px; }
+  .logo { display: flex; align-items: center; gap: 10px; margin: 0; font: 700 19px/1 var(--display); letter-spacing: -.02em; white-space: nowrap; }
+  .logo svg { width: 30px; height: 30px; }
+  [role=tablist] { display: flex; gap: 4px; height: 100%; align-items: center; }
+  [role=tab] { position: relative; display: inline-flex; align-items: center; gap: 8px; height: 42px; padding: 0 16px;
+               background: none; border: 0; border-radius: 12px; color: var(--muted); font-weight: 600; cursor: pointer;
+               transition: color .2s, background .2s; }
+  [role=tab] .ic { width: 17px; height: 17px; }
+  [role=tab]:hover { color: var(--ink); background: rgba(255,255,255,.04); }
+  [role=tab][aria-selected=true] { color: var(--ink); background: rgba(63,233,255,.09); }
+  [role=tab][aria-selected=true]::after { content: ""; position: absolute; left: 16px; right: 16px; bottom: 4px; height: 2px; border-radius: 2px;
+                                          background: var(--cyan); }
+  .badge { min-width: 22px; padding: 1px 8px; border-radius: 99px; background: var(--magenta); color: var(--mag-ink);
+           font: 700 11px/19px var(--body); text-align: center; }
+  .pill { margin-left: auto; display: inline-flex; align-items: center; gap: 9px; height: 38px; padding: 0 15px; border-radius: 99px;
+          background: rgba(255,255,255,.04); border: 1px solid var(--edge); color: var(--muted); font-size: 13px; white-space: nowrap; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--dim); flex: none; }
+  .pill.on { color: var(--ink); border-color: rgba(255,107,134,.35); }
+  .pill.on .dot, .dot.vivo { background: var(--bad); animation: latido 1.6s infinite; }
+  @keyframes latido { 0% { box-shadow: 0 0 0 0 rgba(255,107,134,.7); } 70%, 100% { box-shadow: 0 0 0 9px rgba(255,107,134,0); } }
+
+  main { max-width: 1500px; margin: 0 auto; padding: 28px 24px 120px; }
+  [role=tabpanel] { animation: none; }
+  .panel { padding: 24px; }
+  h2.titulo { margin: 0 0 18px; font: 600 15px/1.2 var(--display); letter-spacing: -.01em; }
+  .ayuda { margin: -8px 0 16px; color: var(--muted); font-size: 13px; }
+  label { display: block; font-size: 12.5px; color: var(--muted); margin: 14px 0 6px; }
+  input[type=text], input[type=number], select {
+    width: 100%; height: 42px; padding: 0 13px; border-radius: var(--r-sm); border: 1px solid var(--edge);
+    background: var(--field); color: var(--ink); transition: border-color .2s, box-shadow .2s, background .2s; }
+  input:hover, select:hover { border-color: var(--edge-hi); }
+  input:focus, select:focus { outline: none; border-color: rgba(63,233,255,.7); box-shadow: 0 0 0 4px rgba(63,233,255,.14); background: rgba(5,7,16,.75); }
+  input::placeholder { color: var(--dim); }
+  select { appearance: none; padding-right: 36px; cursor: pointer;
+           background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23a2abc4' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+           background-repeat: no-repeat; background-position: right 12px center; background-size: 16px; }
+  select option { background: #0c0f1c; color: var(--ink); }
+  .dos { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
+  .check { display: flex; align-items: flex-start; gap: 11px; margin: 18px 0 0; color: var(--ink); font-size: 14px; cursor: pointer; }
+  .check input { appearance: none; width: 20px; height: 20px; margin: 1px 0 0; flex: none; border-radius: 6px; cursor: pointer;
+                 border: 1px solid var(--edge-hi); background: var(--field); display: grid; place-content: center; transition: background .2s, border-color .2s; }
+  .check input::after { content: ""; width: 10px; height: 6px; border: 2px solid var(--cyan-ink); border-top: 0; border-right: 0;
+                        transform: rotate(-45deg) translate(1px, -1px) scale(0); transition: transform .2s var(--ease); }
+  .check input:checked { background: var(--cyan); border-color: var(--cyan); }
+  .check input:checked::after { transform: rotate(-45deg) translate(1px, -1px) scale(1); }
+  .check small { color: var(--muted); }
+  details > summary { cursor: pointer; color: var(--muted); font-size: 13.5px; padding: 6px 0; list-style: none; display: flex; align-items: center; gap: 8px; }
+  details > summary::-webkit-details-marker { display: none; }
+  details > summary .ic { transition: transform .25s var(--ease); }
+  details[open] > summary { color: var(--ink); }
+  details[open] > summary .ic { transform: rotate(90deg); }
+
+  /* ---------- botones: un solo sistema ---------- */
+  .btn { position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 40px; padding: 0 15px;
+         border: 1px solid var(--edge); border-radius: var(--r-sm); background: rgba(255,255,255,.05); color: var(--ink);
+         cursor: pointer; font-size: 13.5px; font-weight: 600; white-space: nowrap;
+         transition: transform .18s var(--ease), background .2s, border-color .2s, box-shadow .25s; }
+  .btn:hover { background: rgba(255,255,255,.09); border-color: var(--edge-hi); transform: translateY(-1px); }
+  .btn:active { transform: translateY(1px) scale(.98); }
+  .btn:disabled { opacity: .5; cursor: not-allowed; transform: none; }
+  .btn.primario { background: var(--cyan); border-color: var(--cyan); color: var(--cyan-ink); }
+  .btn.primario:hover { background: #7ff1ff; box-shadow: 0 8px 20px -8px rgba(0,0,0,.7); }
+  .btn.peligro { background: var(--stop); border-color: var(--stop); color: #fff; }
+  .btn.peligro:hover { background: #e23756; box-shadow: 0 8px 20px -8px rgba(0,0,0,.7); }
+  .btn.peligro-suave { background: transparent; border-color: rgba(255,107,134,.5); color: var(--bad); }
+  .btn.peligro-suave:hover { background: rgba(255,107,134,.1); border-color: var(--bad); }
+  .btn.peligro-suave:disabled, .btn.peligro:disabled { background: transparent; border-color: var(--edge); color: var(--dim); }
+  .btn.ya { background: var(--magenta); border-color: var(--magenta); color: var(--mag-ink); animation: aura 2.4s ease-in-out infinite; }
+  .btn.ya:hover { background: #ff7fe3; }
+  .btn.ya.flash { background: var(--ok); border-color: var(--ok); color: #04220f; animation: none; }
+  @keyframes aura { 0%, 100% { box-shadow: 0 8px 26px -8px rgba(255,79,216,.55); } 50% { box-shadow: 0 10px 38px -4px rgba(255,79,216,.85); } }
+  .btn.grande { width: 100%; height: 54px; font-size: 15.5px; border-radius: 14px; }
+  .btn.si { border-color: rgba(76,240,160,.6); color: var(--ok); background: rgba(76,240,160,.08); }
+  .btn.solo-ic { width: 40px; padding: 0; }
+  kbd { font: 600 11px/1 var(--mono); padding: 3px 6px; border-radius: 5px; background: rgba(0,0,0,.22); }
+  .err { color: var(--bad); font-size: 13px; min-height: 18px; margin-top: 10px; }
+  .ok { color: var(--ok); font-size: 13px; min-height: 18px; margin-top: 10px; }
+
+  /* ---------- Cazar ---------- */
+  .cazar { display: grid; grid-template-columns: 390px 1fr; gap: 24px; align-items: start; }
+  .acciones-caza { display: grid; gap: 12px; margin-top: 22px; }
+  .en-vivo { margin: -4px 0 0; }
+  .en-vivo-canal { display: flex; align-items: center; gap: 12px; font: 700 clamp(28px, 3vw, 38px)/1.05 var(--display);
+                   letter-spacing: -.035em; word-break: break-word; }
+  .en-vivo-sub { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+  .en-vivo-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 20px; }
+  .stat { padding: 14px 16px; border-radius: 14px; background: rgba(0,0,0,.24); border: 1px solid var(--edge); }
+  .stat b { display: block; font: 600 26px/1.1 var(--display); letter-spacing: -.02em; }
+  .stat span { color: var(--muted); font-size: 12.5px; }
+  .pulso-cab { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  .pulso-cab h2 { margin: 0; }
+  .sesion { color: var(--muted); font-size: 13px; }
+  .sesion b { color: var(--ink); font: 600 24px/1 var(--display); margin-right: 6px; }
+  .medidores { display: grid; gap: 22px; margin: 26px 0 10px; }
+  .medidor .fila { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 2px 12px; font-size: 13.5px; margin-bottom: 9px; }
+  .medidor .fila span:last-child { margin-left: auto; }
+  .medidor .fila span:last-child { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .medidor .fila b { color: var(--ink); font-family: var(--display); font-weight: 600; }
+  .pista { position: relative; height: 8px; border-radius: 99px; background: rgba(255,255,255,.07); overflow: hidden; }
+  /* inicios en color sólido: el mismo tono semitransparente sobre negro salía oliva/sucio */
+  .relleno { height: 100%; width: 0; border-radius: 99px; transition: width .9s var(--ease), background .4s;
+             background: linear-gradient(90deg, #1596b3, var(--cyan)); }
+  .relleno.cerca { background: linear-gradient(90deg, #e08a12, var(--warn)); }
+  .relleno.dispara { background: linear-gradient(90deg, #17a865, var(--ok)); }
+  .normal-txt { color: var(--muted); font-size: 12.5px; margin-top: 2px; }
+  .ultimo { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 20px; padding: 13px 15px; border-radius: 14px;
+            background: rgba(255,79,216,.07); border: 1px solid rgba(255,79,216,.22); font-size: 13.5px; }
+  .vacio-pulso { color: var(--muted); text-align: center; padding: 48px 16px; max-width: 46ch; margin: 0 auto; }
+  .vacio-pulso .ic { display: block; width: 34px; height: 34px; margin: 0 auto 12px; color: var(--cyan); opacity: .8; }
+  .sub-h { margin: 28px 0 12px; font-size: 13px; color: var(--muted); font-weight: 600; }
+  .mini-clips { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 12px; }
+  .mini { position: relative; padding: 0; border: 1px solid var(--edge); border-radius: 14px; overflow: hidden; background: #000;
+          cursor: pointer; aspect-ratio: 9/16; transition: transform .25s var(--ease), border-color .2s, box-shadow .25s; }
+  .mini:hover { transform: translateY(-2px); border-color: rgba(63,233,255,.6); box-shadow: 0 14px 30px -10px rgba(0,0,0,.8); }
+  .mini img { width: 100%; height: 100%; object-fit: cover; display: block; transition: transform .5s var(--ease); }
+  .mini:hover img { transform: scale(1.03); }
+  .mini .score { top: 7px; left: 7px; }
+  .mini-nom { position: absolute; left: 0; right: 0; bottom: 0; padding: 18px 9px 7px; font: 11.5px var(--mono); color: #fff; text-align: left;
+              background: linear-gradient(transparent, rgba(2,3,10,.9)); }
+  pre#log { margin: 12px 0 0; max-height: 260px; overflow: auto; background: rgba(0,0,0,.35); border: 1px solid var(--edge);
+            border-radius: var(--r-sm); padding: 12px 14px; font: 12px/1.55 var(--mono); color: #b9c1d8; white-space: pre-wrap; word-break: break-word; }
+
+  /* ---------- Clips ---------- */
+  .herramientas { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 22px; }
+  .herramientas h2 { margin: 0 auto 0 0; font: 700 clamp(22px, 2.2vw, 28px)/1.1 var(--display); letter-spacing: -.03em; }
+  .herramientas select { width: auto; }
+  .grupo { margin-bottom: 34px; }
+  .grupo h3 { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 0 0 14px; font: 600 14.5px/1.3 var(--display); letter-spacing: -.01em; }
+  .grupo h3 small { color: var(--muted); font: 400 13px var(--body); }
+  .grupo h3 .btn { margin-left: auto; height: 34px; font-size: 12.5px; }
+  .grupo.para { padding: 20px; border-radius: var(--r-lg); border: 1px solid rgba(255,79,216,.3);
+                background: linear-gradient(140deg, rgba(255,79,216,.1), rgba(63,233,255,.05)); }
+  .grupo.para h3 { font-size: 17px; }
+  .grupo.para h3 .ic { color: var(--magenta); }
+  .pista-grupo { margin: -6px 0 14px; color: var(--muted); font-size: 13px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(216px, 1fr)); gap: 18px; }
+  .clip { display: flex; flex-direction: column; background: var(--solid); border: 1px solid var(--edge); border-radius: 18px; overflow: hidden;
+          transition: transform .25s var(--ease), border-color .2s, box-shadow .3s, opacity .2s; }
+  .clip:hover { transform: translateY(-2px); border-color: rgba(63,233,255,.35); box-shadow: 0 18px 40px -14px rgba(0,0,0,.85); }
+  .clip.bueno { border-color: rgba(76,240,160,.5); }
+  .clip.descartado { opacity: .42; }
+  .media { position: relative; background: #000; }
+  .media video { display: block; width: 100%; aspect-ratio: 9/16; object-fit: cover; background: #05060c; }
+  .score { position: absolute; top: 10px; left: 10px; display: inline-flex; align-items: center; gap: 4px; padding: 4px 9px 4px 7px; border-radius: 99px;
+           font: 600 12.5px/1 var(--display); background: rgba(4,5,11,.72); color: var(--ink); pointer-events: none;
+           -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); border: 1px solid var(--edge); }
+  .score .ic { width: 13px; height: 13px; color: var(--muted); fill: currentColor; stroke-width: 1.4; }
+  .score.alto { background: var(--ok); color: #04220f; border-color: transparent; } .score.alto .ic { color: #04220f; }
+  .score.medio { background: var(--warn); color: #241802; border-color: transparent; } .score.medio .ic { color: #241802; }
+  .tag { position: absolute; top: 10px; right: 10px; display: inline-flex; align-items: center; gap: 5px; padding: 4px 9px; border-radius: 99px;
+         font-size: 11.5px; font-weight: 700; background: var(--magenta); color: var(--mag-ink); pointer-events: none; }
+  .tag .ic { width: 13px; height: 13px; }
+  .cuerpo { display: flex; flex-direction: column; gap: 8px; padding: 12px 13px 13px; flex: 1; }
+  .nombre { font: 12px var(--mono); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .nombre.titulo-clip { font: 600 13px/1.35 var(--body); color: var(--ink); white-space: normal;
+                        display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .chips { display: flex; flex-wrap: wrap; gap: 5px; }
+  .chip { display: inline-flex; align-items: center; gap: 5px; padding: 4px 11px; border-radius: 99px; background: rgba(255,255,255,.06);
+          border: 1px solid var(--edge); font-size: 12px; color: var(--ink); white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .chip .ic { width: 13px; height: 13px; color: var(--muted); }
+  .chatline { display: flex; gap: 6px; align-items: center; font-size: 12px; color: var(--muted); min-width: 0; }
+  .chatline span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .chatline .ic { width: 13px; height: 13px; }
+  .tags { font-size: 12px; color: var(--cyan); line-height: 1.55; }
+  /* Bueno|Descartar arriba, Editar|papelera abajo (cuatro en fila no caben a ~210px) */
+  .fila-acc { display: grid; grid-template-columns: 1fr 1fr 40px; grid-template-areas: "b d d" "e e t"; gap: 7px; margin-top: auto; padding-top: 6px; }
+  .fila-acc .btn { min-width: 0; height: 36px; padding: 0 6px; font-size: 12.5px; overflow: hidden; }
+  .fila-acc .btn span { overflow: hidden; text-overflow: ellipsis; }
+  .fila-acc .b-bueno { grid-area: b; } .fila-acc .b-desc { grid-area: d; }
+  .fila-acc .b-edit { grid-area: e; } .fila-acc .b-tira { grid-area: t; padding: 0; }
+  .fila-acc .b-copiar { grid-column: 1 / -1; grid-row: 1; }
+  .fila-acc .b-subido { grid-column: 1 / 3; grid-row: 2; }
+  .vacio { color: var(--muted); text-align: center; padding: 70px 16px; }
+  .vacio b { display: block; font: 600 18px/1.3 var(--display); color: var(--ink); margin-bottom: 6px; }
+  .vacio .btn { margin-top: 18px; }
+
+  /* ---------- editor ---------- */
+  dialog { width: min(1060px, calc(100vw - 32px)); max-height: calc(100vh - 32px); padding: 0; color: var(--ink);
+           border: 1px solid var(--edge-hi); border-radius: 24px; background: rgba(12,15,30,.74);
+           -webkit-backdrop-filter: blur(28px) saturate(160%); backdrop-filter: blur(28px) saturate(160%);
+           box-shadow: 0 40px 90px -20px rgba(0,0,0,.8), inset 0 1px 0 rgba(255,255,255,.08); }
+  dialog[open] { animation: abrir .45s var(--ease); }
+  @keyframes abrir { from { opacity: 0; transform: translateY(14px) scale(.98); filter: blur(6px); } }
+  dialog::backdrop { background: rgba(2,3,8,.55); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); }
+  .ed-cab { display: flex; align-items: center; gap: 12px; padding: 16px 20px; border-bottom: 1px solid var(--edge); }
+  .ed-cab h2 { margin: 0; font: 13.5px var(--mono); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ed-cab .btn { margin-left: auto; }
+  .ed-cuerpo { display: grid; grid-template-columns: minmax(260px, 380px) 1fr; gap: 24px; padding: 20px; overflow: auto; max-height: calc(100vh - 110px); }
+  .ed-cuerpo video { width: 100%; max-height: calc(100vh - 160px); aspect-ratio: 9/16; background: #000; border-radius: 16px; display: block; border: 1px solid var(--edge); }
+  .ed-panel { display: grid; gap: 16px; align-content: start; }
+  .seccion { background: rgba(255,255,255,.035); border: 1px solid var(--edge); border-radius: 18px; padding: 18px; }
+  .seccion h3 { display: flex; align-items: center; gap: 9px; margin: 0 0 4px; font: 600 14.5px/1.3 var(--display); letter-spacing: -.01em; }
+  .seccion h3 .ic { color: var(--cyan); }
+  .seccion p { margin: 0 0 14px; color: var(--muted); font-size: 13px; }
+  .tiempos { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; color: var(--muted); }
+  .tiempo { font: 600 16px var(--display); padding: 8px 12px; background: rgba(0,0,0,.3); border: 1px solid var(--edge); border-radius: 10px;
+            min-width: 84px; text-align: center; color: var(--ink); }
+  .botones { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
+  .ed-info { display: flex; flex-wrap: wrap; gap: 6px; }
+
+  /* ---------- Ajustes ---------- */
+  .ajustes { display: grid; grid-template-columns: 1fr 1.25fr; gap: 24px; align-items: start; }
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; font-size: 12px; color: var(--muted); font-weight: 600; padding: 0 4px 8px; }
+  td { padding: 4px; }
+  td input[type=text] { font: 13px var(--mono); padding: 0 10px; }
+  td:last-child { white-space: nowrap; width: 1%; }
+  .pista-split { margin: 8px 0 0 31px; font-size: 12.5px; color: var(--cyan); }
+  .deteccion { margin-top: 20px; padding-top: 18px; border-top: 1px solid var(--edge); }
+  .segmentado.modo { grid-template-columns: 1fr 1fr; margin-bottom: 18px; }
+  .segmentado.modo button { flex-direction: row; flex-wrap: wrap; justify-content: center; column-gap: 7px; padding: 10px 6px; }
+  .segmentado.modo button small { flex-basis: 100%; text-align: center; }
+  .segmentado.modo .ic { width: 15px; height: 15px; }
+  .dos.vod-dos { grid-template-columns: 1fr 92px; }
+  .es-vod [data-solo-vivo] { display: none !important; }
+  .pista-vod { margin-top: 8px; font-size: 12px; color: var(--dim); }
+  .pasos-vod { list-style: none; margin: 18px 0 4px; padding: 0; display: grid; gap: 14px; }
+  .pasos-vod li { display: grid; grid-template-columns: 28px 1fr; gap: 12px; align-items: start; color: var(--dim); }
+  .pasos-vod li b { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%;
+                    border: 1px solid var(--edge); font-size: 12.5px; color: var(--muted); }
+  .pasos-vod li span { padding-top: 4px; font-size: 13.5px; }
+  .pasos-vod li small { display: block; color: var(--dim); font-size: 12px; margin-top: 2px; }
+  .pasos-vod li.hecho b { background: rgba(255,255,255,.06); color: var(--cyan); }
+  .pasos-vod li.activo { color: var(--ink); }
+  .pasos-vod li.activo b { background: var(--cyan); border-color: var(--cyan); color: var(--cyan-ink); }
+  .etq { display: block; font-size: 12.5px; color: var(--muted); margin: 14px 0 7px; }
+  .etq:first-child { margin-top: 0; }
+  .segmentado { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; padding: 4px; border-radius: 13px;
+                background: var(--field); border: 1px solid var(--edge); }
+  .segmentado button { display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 8px 4px; border: 0; border-radius: 10px;
+                       background: transparent; color: var(--muted); font-weight: 600; font-size: 13.5px; cursor: pointer;
+                       transition: background .2s, color .2s; }
+  .segmentado button small { font-weight: 400; font-size: 11.5px; color: var(--dim); }
+  .segmentado button:hover { color: var(--ink); background: rgba(255,255,255,.05); }
+  .segmentado button[aria-checked=true] { background: var(--cyan); color: var(--cyan-ink); }
+  .segmentado button[aria-checked=true] small { color: rgba(2,20,26,.75); }
+  .personalizada { margin-top: 7px; font-size: 12px; color: var(--warn); }
+  td .btn { height: 42px; }
+  .previa { grid-column: 1 / -1; }
+  #prevImg { display: block; width: 100%; height: auto; border-radius: 14px; background: #000; margin-top: 8px; border: 1px solid var(--edge); }
+  tr.activa td input { border-color: rgba(63,233,255,.7); }
+
+  /* ---------- Limpieza ---------- */
+  .lim-lista { display: grid; gap: 10px; }
+  .lim-fila { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 18px; padding: 16px 18px; border-radius: 16px;
+              background: rgba(255,255,255,.035); border: 1px solid var(--edge); transition: border-color .2s, background .2s; }
+  .lim-fila:hover { border-color: var(--edge-hi); background: rgba(255,255,255,.05); }
+  .lim-fila h3 { margin: 0 0 3px; font: 600 14.5px/1.3 var(--display); letter-spacing: -.01em; }
+  .lim-fila p { margin: 0; color: var(--muted); font-size: 13px; }
+  .lim-num { text-align: right; white-space: nowrap; }
+  .lim-num b { display: block; font: 600 19px/1.15 var(--display); letter-spacing: -.02em; }
+  .lim-num span { color: var(--muted); font-size: 12px; }
+  .lim-fila.peligro { border-color: rgba(255,107,134,.3); }
+  .lim-fila .btn { min-width: 168px; }
+
+  /* ---------- barra en vivo + aviso ---------- */
+  #barra { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); z-index: 30; display: flex; align-items: center; gap: 12px;
+           padding: 8px 8px 8px 18px; border-radius: 99px; white-space: nowrap; animation: subir .5s var(--ease); }
+  @keyframes subir { from { opacity: 0; transform: translate(-50%, 16px); } }
+  #barra .btn { border-radius: 99px; height: 42px; }
+  #aviso { position: fixed; right: 22px; bottom: 92px; z-index: 40; max-width: 400px; display: flex; gap: 11px; align-items: flex-start;
+           padding: 14px 18px; border-radius: 16px; font-size: 13.5px; white-space: pre-line;
+           border-color: rgba(76,240,160,.45); opacity: 0; transform: translateY(10px); pointer-events: none;
+           transition: opacity .3s var(--ease), transform .3s var(--ease); }
+  #aviso .ic { color: var(--ok); margin-top: 2px; }
+  #aviso.ver { opacity: 1; transform: none; }
+  #aviso.malo { border-color: rgba(255,107,134,.5); }
+  #aviso.malo .ic { color: var(--bad); }
+
+  /* entrada una sola vez al abrir la app */
+  .entrando .glass, .entrando .herramientas { animation: entrar .8s var(--ease) both; animation-delay: calc(var(--i, 0) * 90ms); }
+  @keyframes entrar { from { opacity: 0; transform: translateY(18px); filter: blur(8px); } }
+  /* transición entre pestañas */
+  ::view-transition-old(root) { animation: .22s var(--ease) both salirVT; }
+  ::view-transition-new(root) { animation: .38s var(--ease) both entrarVT; }
+  @keyframes salirVT { to { opacity: 0; filter: blur(4px); } }
+  @keyframes entrarVT { from { opacity: 0; transform: translateY(8px); filter: blur(4px); } }
+
+  @media (max-width: 1080px) {
+    .cazar, .ajustes, .ed-cuerpo { grid-template-columns: 1fr; }
+    .ed-cuerpo video { max-height: 60vh; margin: 0 auto; width: auto; }
+  }
+  @media (max-width: 720px) {
+    header { width: calc(100% - 24px); top: 8px; margin-top: 8px; height: auto; flex-wrap: wrap; gap: 8px 10px; padding: 10px 10px 6px 14px; }
+    [role=tablist] { order: 3; width: 100%; height: 48px; overflow-x: auto; scrollbar-width: none; }
+    [role=tablist]::-webkit-scrollbar { display: none; }   /* se desliza igual; sin la raya de la barra */
+    [role=tab] { padding: 0 12px; flex: none; }
+    main { padding: 20px 16px 120px; }
+    .panel { padding: 18px; }
+    .grid { grid-template-columns: repeat(auto-fill, minmax(152px, 1fr)); gap: 12px; }
+    .lim-fila { grid-template-columns: 1fr auto; } .lim-fila .btn { grid-column: 1 / -1; }
+    #barra { left: 12px; right: 12px; transform: none; justify-content: space-between; animation: none; }
+    #barra .txt { overflow: hidden; text-overflow: ellipsis; }
+    #aviso { left: 12px; right: 12px; max-width: none; }
+    .btn, select, input[type=text], input[type=number], [role=tab] { min-height: 44px; }   /* objetivo táctil */
+    .fila-acc .btn { height: 44px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after, ::view-transition-group(*) { animation: none !important; transition: none !important; }
+    .glass::before { display: none; }
+  }
+
+  /* ---------- Revisar (piloto de Hypazo) ---------- */
+  .rv-cab { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 14px; }
+  .rv-cab select { min-width: 0; flex: 1 1 260px; }
+  .rv-meta { color: var(--muted); font-size: 13px; }
+  .rv-meta .warn { color: var(--warn); }
+  .rv-clip { display: flex; gap: 14px; padding: 12px; border-radius: var(--r); background: var(--glass-hi);
+             border: 1px solid var(--edge); margin: 10px 0; }
+  .rv-clip.descartado { opacity: .5; }
+  .rv-clip video { width: 120px; aspect-ratio: 9 / 16; border-radius: var(--r-sm); background: #000; flex: none; }
+  .rv-info { flex: 1; min-width: 0; }
+  .rv-top { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 6px; }
+  .rv-t { font: 600 16px var(--mono); }
+  .rv-o { padding: 2px 10px; border-radius: 99px; font-size: 12px; font-weight: 700; }
+  .rv-o.automatico { background: var(--cyan); color: var(--cyan-ink); }
+  .rv-o.manual { background: var(--warn); color: #241a00; }
+  .rv-o.forzado { background: var(--magenta); color: var(--mag-ink); }
+  .rv-o.gris { background: rgba(255,255,255,.12); color: var(--ink); }
+  .rv-o.pend { background: rgba(255,203,87,.15); color: var(--warn); }
+  .rv-tags { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+  .rv-tag { padding: 5px 12px; border-radius: 99px; border: 1.5px solid var(--edge-hi); background: transparent;
+            color: var(--muted); font-size: 13px; cursor: pointer; }
+  .rv-tag[aria-pressed=true] { background: var(--ok); border-color: var(--ok); color: #04220f; font-weight: 800; }
+  .rv-tag[aria-pressed=true]::before { content: "✓ "; }
+  .rv-link { background: none; border: none; padding: 0; color: var(--cyan); text-decoration: underline; cursor: pointer; font-size: 13px; }
+  .rv-par { border: 1.5px solid rgba(63,233,255,.35); border-radius: var(--r-lg); padding: 10px 12px; margin: 12px 0;
+            background: rgba(63,233,255,.04); }
+  .rv-barra { position: relative; height: 12px; background: var(--field); border-radius: 6px; margin: 6px 0 2px; }
+  .rv-barra i { position: absolute; height: 6px; border-radius: 3px; }
+  .rv-seg { display: flex; border: 1.5px solid var(--edge-hi); border-radius: var(--r-sm); overflow: hidden; margin-top: 8px; }
+  .rv-seg button { flex: 1; min-width: 0; background: none; border: none; color: var(--ink); padding: 8px 4px; font-size: 13px;
+                  cursor: pointer; white-space: normal; line-height: 1.25; }
+  .rv-seg button + button { border-left: 1.5px solid var(--edge-hi); }
+  .rv-seg button[aria-pressed=true] { background: var(--warn); color: #241a00; font-weight: 800; }
+  .rv-seg button[aria-pressed=true]::before { content: "✓ "; }
+  .rv-seguro { color: var(--ok); font-size: 13px; margin-top: 6px; }
+  .rv-escapa { border: 1px dashed var(--edge-hi); border-radius: var(--r); padding: 12px; margin: 16px 0; }
+  .rv-fila { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 8px; }
+  .rv-pie { display: flex; flex-wrap: wrap; gap: 10px; justify-content: space-between; align-items: center; margin-top: 14px; }
+  .rv-ok { color: var(--ok); font-size: 13px; }
+  #dlgResumen { width: min(680px, calc(100vw - 32px)); padding: 20px; }
+  #dlgResumen pre { background: var(--field); border-radius: var(--r-sm); padding: 12px; font: 12.5px/1.5 var(--mono);
+                    white-space: pre-wrap; max-height: 50vh; overflow: auto; }
+  .rv-tabs { display: flex; gap: 6px; margin: 8px 0; }
+  .rv-tabs button[aria-selected=true] { background: var(--cyan); border-color: var(--cyan); color: var(--cyan-ink); }
+  @media (max-width: 560px) { .rv-clip { gap: 10px; } .rv-clip video { width: 92px; } }
+</style>
+</head>
+<body class="entrando">
+<!-- Iconos: un solo set dibujado, mismo trazo y grosor -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-target" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.2"/></symbol>
+  <symbol id="i-film" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2.5"/><path d="M7.5 3v18M16.5 3v18M3 8h4.5M3 16h4.5M16.5 8H21M16.5 16H21M3 12h18"/></symbol>
+  <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M2 14h4M10 8h4M18 16h4"/></symbol>
+  <symbol id="i-sparkle" viewBox="0 0 24 24"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4.5v15l12-7.5z"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 24 24"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></symbol>
+  <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></symbol>
+  <symbol id="i-zap" viewBox="0 0 24 24"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6M10 11v6M14 11v6"/></symbol>
+  <symbol id="i-pencil" viewBox="0 0 24 24"><path d="M17 3a2.8 2.8 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5z"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.7-.9l-.8-1.2A2 2 0 0 0 7.9 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2z"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="13" height="13" rx="2.5"/><path d="M4 16a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2"/></symbol>
+  <symbol id="i-upload" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></symbol>
+  <symbol id="i-undo" viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M21 12a9 9 0 0 1-15.5 6.2L3 16M3 12A9 9 0 0 1 18.5 5.8L21 8M21 3v5h-5M3 21v-5h5"/></symbol>
+  <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="i-scissors" viewBox="0 0 24 24"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4 8.1 15.9M14.5 14.5 20 20M8.1 8.1 12 12"/></symbol>
+  <symbol id="i-clapper" viewBox="0 0 24 24"><path d="M3 11h18v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zM3 11l-.6-2.4a2 2 0 0 1 1.4-2.4l13.6-3.6a2 2 0 0 1 2.4 1.4L20.4 6zM7 5.6l3 4.2M12.8 4l3 4.2"/></symbol>
+  <symbol id="i-chat" viewBox="0 0 24 24"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22z"/></symbol>
+  <symbol id="i-flame" viewBox="0 0 24 24"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.4-.5-2-1-3-1.1-2.1-.2-4.1 2-6 .5 2.5 2 4.9 4 6.5s3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.2.4-2.3 1-3a2.5 2.5 0 0 0 2.5 2.5z"/></symbol>
+  <symbol id="i-users" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8"/></symbol>
+  <symbol id="i-volume" viewBox="0 0 24 24"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M19 5a10 10 0 0 1 0 14"/></symbol>
+  <symbol id="i-hand" viewBox="0 0 24 24"><path d="M18 11V6a2 2 0 0 0-4 0M14 10V4a2 2 0 0 0-4 0v2M10 10.5V6a2 2 0 0 0-4 0v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.9-6-2.3l-3.6-3.6a2 2 0 0 1 2.8-2.8L7 15"/></symbol>
+  <symbol id="i-star" viewBox="0 0 24 24"><path d="m12 2.8 2.8 5.7 6.3.9-4.6 4.4 1.1 6.3L12 17.2l-5.6 2.9 1.1-6.3-4.6-4.4 6.3-.9z"/></symbol>
+  <symbol id="i-activity" viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></symbol>
+  <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 16v-4M12 8h.01"/></symbol>
+</svg>
+
+<div class="aurora" id="aurora" aria-hidden="true"><i class="a1"></i><i class="a2"></i><i class="a3"></i></div>
+<div class="grano" aria-hidden="true"></div>
+<div class="barrido" id="barrido" aria-hidden="true"></div>
+
+<header class="glass" style="--i:0">
+  <h1 class="logo">
+    <svg viewBox="0 0 32 32" aria-hidden="true">
+      <defs><linearGradient id="gl" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#3fe9ff"/><stop offset="1" stop-color="#ff4fd8"/></linearGradient></defs>
+      <rect x="3.5" y="6.5" width="25" height="19" rx="6.5" fill="none" stroke="url(#gl)" stroke-width="2.4"/>
+      <path d="M13.5 11.8v8.4l7-4.2z" fill="url(#gl)"/>
+    </svg>
+    Clipeo
+  </h1>
+  <nav role="tablist" aria-label="Secciones">
+    <button role="tab" id="t-cazar" data-tab="cazar" aria-controls="tab-cazar"><svg class="ic"><use href="#i-target"/></svg>Cazar</button>
+    <button role="tab" id="t-clips" data-tab="clips" aria-controls="tab-clips"><svg class="ic"><use href="#i-film"/></svg>Clips<span class="badge" id="nPend" hidden></span></button>
+    <button role="tab" id="t-ajustes" data-tab="ajustes" aria-controls="tab-ajustes"><svg class="ic"><use href="#i-sliders"/></svg>Ajustes</button>
+    <button role="tab" id="t-revisar" data-tab="revisar" aria-controls="tab-revisar"><svg class="ic"><use href="#i-check"/></svg>Revisar</button>
+    <button role="tab" id="t-limpieza" data-tab="limpieza" aria-controls="tab-limpieza"><svg class="ic"><use href="#i-sparkle"/></svg>Limpieza</button>
+  </nav>
+  <span class="pill" id="estado"><span class="dot"></span><span id="estadoTxt">Parado</span></span>
+</header>
+
+<main>
+  <!-- ===================== CAZAR ===================== -->
+  <section role="tabpanel" id="tab-cazar" aria-labelledby="t-cazar">
+    <div class="cazar">
+      <div class="glass panel" style="--i:1">
+        <h2 class="titulo" id="tituloCaza">Cazador automático</h2>
+        <!-- Mientras caza: el canal en grande en vez del formulario. -->
+        <div id="enVivo" class="en-vivo" hidden>
+          <div class="en-vivo-canal"><span class="dot vivo" aria-hidden="true"></span><span id="vivoCanal"></span></div>
+          <div class="en-vivo-sub" id="vivoSub"></div>
+          <div class="en-vivo-stats">
+            <div class="stat"><b id="vivoTiempo">0:00</b><span>cazando</span></div>
+            <div class="stat"><b id="vivoClips">0</b><span id="vivoClipsTxt">clips</span></div>
+          </div>
+        </div>
+        <div id="formCaza">
+          <div class="segmentado modo" role="radiogroup" aria-label="Qué quieres cazar" id="modo">
+            <button type="button" role="radio" data-v="vivo"><svg class="ic"><use href="#i-activity"/></svg>En directo<small>caza mientras emite</small></button>
+            <button type="button" role="radio" data-v="vod"><svg class="ic"><use href="#i-zap"/></svg>Directo ya hecho<small>lo mejor de un VOD</small></button>
+          </div>
+          <div id="campoVod" hidden>
+            <div class="dos vod-dos">
+              <div><label for="vodUrl">Enlace del VOD de Twitch</label><input type="text" inputmode="url" id="vodUrl" placeholder="https://www.twitch.tv/videos/…" spellcheck="false" autocomplete="off"></div>
+              <div><label for="vodN">Clips</label><select id="vodN"><option>5</option><option selected>10</option><option>15</option><option>20</option></select></div>
+            </div>
+            <div class="pista-vod">Twitch guarda los VOD unas semanas; si el streamer lo borró o es solo para subs, no se puede.</div>
+          </div>
+          <div class="dos" id="campoVivo" data-solo-vivo>
+            <div>
+              <label for="plataforma">Plataforma</label>
+              <select id="plataforma"><option value="twitch">Twitch</option><option value="kick">Kick</option></select>
+            </div>
+            <div>
+              <label for="canal">Canal</label>
+              <input type="text" id="canal" list="streamers" value="auronplay" autocomplete="off" spellcheck="false">
+              <datalist id="streamers"></datalist>
+            </div>
+          </div>
+          <label for="credito">Crédito en pantalla</label>
+          <input type="text" id="credito" placeholder="@auronplay" maxlength="40" spellcheck="false">
+          <label class="check"><input type="checkbox" id="split"> <span>Formato split<br><small>cara arriba, gameplay abajo y chat real</small></span></label>
+          <div class="pista-split" id="pistaSplit" data-solo-vivo hidden></div>
+          <div class="deteccion">
+            <span class="etq" id="sensEtq" data-solo-vivo>¿Cuántos clips quieres?</span>
+            <div class="segmentado" role="radiogroup" aria-labelledby="sensEtq" id="sens" data-solo-vivo>
+              <button type="button" role="radio" data-v="selectiva">Selectiva<small>pocos, muy buenos</small></button>
+              <button type="button" role="radio" data-v="equilibrada">Equilibrada<small>recomendado</small></button>
+              <button type="button" role="radio" data-v="generosa">Generosa<small>más clips</small></button>
+            </div>
+            <div class="personalizada" id="sensPers" data-solo-vivo hidden>Valores personalizados (ver avanzado)</div>
+            <span class="etq" id="remEtq">Tiempo para el remate tras el pico</span>
+            <div class="segmentado" role="radiogroup" aria-labelledby="remEtq" id="remate">
+              <button type="button" role="radio" data-v="4">Corto<small>4 s</small></button>
+              <button type="button" role="radio" data-v="7">Normal<small>7 s</small></button>
+              <button type="button" role="radio" data-v="11">Largo<small>11 s</small></button>
+            </div>
+            <label class="check"><input type="checkbox" id="gritos" checked> <span>Detectar gritos y risas del streamer<br><small>caza también cuando él explota aunque el chat tarde en reaccionar</small></span></label>
+          </div>
+          <details style="margin-top:16px">
+            <summary><svg class="ic"><use href="#i-chevron"/></svg>Valores exactos (avanzado)</summary>
+            <div class="dos">
+              <div><label for="piso">Piso de chat (/3 s)</label><input type="number" id="piso" value="40" min="1"></div>
+              <div><label for="factor">Veces sobre lo normal</label><input type="number" id="factor" value="1.8" step="0.1" min="1"></div>
+              <div><label for="unicos">Personas mínimas</label><input type="number" id="unicos" value="10" min="1"></div>
+              <div><label for="postroll">Post-roll (s)</label><input type="number" id="postroll" value="7" min="0"></div>
+              <div><label for="audio">Grito (dB, 0 = off)</label><input type="number" id="audio" value="12" min="0" max="40"></div>
+            </div>
+          </details>
+        </div>
+        <div class="acciones-caza">
+          <button class="btn primario grande" id="btn"><svg class="ic"><use href="#i-play"/></svg><span>Empezar a cazar</span></button>
+          <button class="btn ya grande" id="ya" hidden title="Atajos: tecla C aquí, o F9 desde cualquier ventana"><svg class="ic"><use href="#i-zap"/></svg><span>¡Clip ya!</span> <kbd>F9</kbd></button>
+          <button class="btn grande" id="pausa" hidden title="Atajo: F8 desde cualquier ventana"><svg class="ic"><use href="#i-pause"/></svg><span>Pausar caza</span> <kbd>F8</kbd></button>
+        </div>
+        <p class="ayuda" id="pausaNota" hidden>Caza automática en pausa: “¡Clip ya!” guarda un clip <b>forzado</b>, pendiente de revisar.</p>
+        <div class="err" id="err" role="alert"></div>
+      </div>
+
+      <div class="glass panel" style="--i:2">
+        <div class="pulso-cab">
+          <h2 class="titulo" id="tituloPulso">Pulso del directo</h2>
+          <span class="sesion"><b id="nSesion">0</b><span id="nSesionTxt">clips en esta sesión</span></span>
+        </div>
+        <div id="pulso"><div class="vacio-pulso"><svg class="ic"><use href="#i-activity"/></svg>Arranca el cazador para ver cómo de cerca está cada momento de convertirse en clip.</div></div>
+        <div id="sesionBox" hidden>
+          <h3 class="sub-h">Últimos clips de hoy en este canal</h3>
+          <div class="mini-clips" id="sesionClips"></div>
+        </div>
+        <details style="margin-top:20px">
+          <summary><svg class="ic"><use href="#i-chevron"/></svg>Registro técnico</summary>
+          <pre id="log" aria-live="off">Sin actividad.</pre>
+        </details>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== CLIPS ===================== -->
+  <section role="tabpanel" id="tab-clips" aria-labelledby="t-clips" hidden>
+    <div class="herramientas" style="--i:1">
+      <h2>Clips cazados</h2>
+      <select id="filtro" aria-label="Filtrar clips">
+        <option value="pend">Pendientes (revisar y subir)</option>
+        <option value="para">Para subir</option>
+        <option value="subidos">Subidos</option>
+        <option value="bueno">Buenos sin producir</option>
+        <option value="descartado">Descartados</option>
+        <option value="todos">Todos</option>
+      </select>
+      <select id="orden" aria-label="Ordenar clips">
+        <option value="reaccion">Mejor score</option><option value="reciente">Más recientes</option>
+      </select>
+    </div>
+    <div id="galeria"><div class="vacio">Cargando…</div></div>
+  </section>
+
+  <!-- ===================== AJUSTES ===================== -->
+  <section role="tabpanel" id="tab-ajustes" aria-labelledby="t-ajustes" hidden>
+    <div class="ajustes">
+      <div class="glass panel" style="--i:1">
+        <h2 class="titulo">Marca de la cuenta</h2>
+        <p class="ayuda">Sale en cada clip que produzcas. Vacío = sin marca.</p>
+        <label for="handle">Tu @ (marca de agua arriba a la derecha)</label>
+        <input type="text" id="handle" maxlength="30" placeholder="@tucuenta" spellcheck="false">
+        <label for="outro">Cierre (últimos 2,5 s)</label>
+        <input type="text" id="outro" maxlength="60" placeholder="Sígueme para más">
+        <div class="botones"><button class="btn primario" id="saveMarca"><svg class="ic"><use href="#i-check"/></svg><span>Guardar marca</span></button></div>
+        <div class="ok" id="marcaMsg" role="status"></div>
+      </div>
+      <div class="glass panel" style="--i:2">
+        <h2 class="titulo">Recortes por streamer (formato split)</h2>
+        <p class="ayuda">ancho:alto:x:y sobre el frame 1920×1080. Se aplican al próximo arranque del cazador.</p>
+        <table>
+          <thead><tr><th>Streamer</th><th>Cara</th><th>Gameplay</th><th><span class="visually-hidden" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)">Acciones</span></th></tr></thead>
+          <tbody id="lays"></tbody>
+        </table>
+        <div class="botones">
+          <button class="btn" id="addLay"><svg class="ic"><use href="#i-plus"/></svg><span>Añadir streamer</span></button>
+          <button class="btn primario" id="saveLay"><svg class="ic"><use href="#i-check"/></svg><span>Guardar recortes</span></button>
+        </div>
+        <div class="ok" id="layMsg" role="status"></div>
+      </div>
+      <div class="glass panel previa" style="--i:3">
+        <div class="pulso-cab">
+          <h2 class="titulo">Vista previa del recorte</h2>
+          <div class="botones" style="margin:0">
+            <select id="prevPlat" aria-label="Plataforma de la vista previa" style="width:auto">
+              <option value="twitch">Twitch</option><option value="kick">Kick</option>
+            </select>
+            <button class="btn" id="prevFresco" disabled><svg class="ic"><use href="#i-refresh"/></svg><span>Frame nuevo</span></button>
+          </div>
+        </div>
+        <p class="ayuda" style="margin-top:10px">Pulsa el ojo de un streamer (tiene que estar en vivo). Rojo = cara (arriba del clip),
+          verde = gameplay (abajo). Si ves algo dentro del rojo que no es la cámara, se colará en el clip: ajusta los números y la previa se redibuja sola.</p>
+        <div class="err" id="prevMsg" role="status" style="color:var(--muted)"></div>
+        <div id="prevBox"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== REVISAR (piloto) ===================== -->
+  <section role="tabpanel" id="tab-revisar" aria-labelledby="t-revisar" hidden>
+    <div class="herramientas" style="--i:1">
+      <h2>Revisar directo</h2>
+      <button class="btn" id="rvRefrescar"><svg class="ic"><use href="#i-refresh"/></svg><span>Actualizar</span></button>
+    </div>
+    <div class="glass panel" style="--i:2">
+      <div class="rv-cab">
+        <label for="rvSesion" class="rv-meta">Sesión</label>
+        <select id="rvSesion"></select>
+      </div>
+      <div class="rv-meta" id="rvCabecera"></div>
+      <div class="err" id="rvAviso" role="alert"></div>
+      <div id="rvLista"><div class="vacio">Aún no hay sesiones del piloto: caza un directo y vuelve aquí.</div></div>
+      <section class="rv-escapa" aria-labelledby="rvEscH" id="rvEscapa" hidden>
+        <b id="rvEscH">¿Recuerdas algún momento que se escapó?</b>
+        <div id="rvEscapados"></div>
+        <div class="rv-fila">
+          <label>≈ <input id="rvEscT" placeholder="01:05:00" size="8" aria-label="Tiempo aproximado en HH:MM:SS"></label>
+          <select id="rvEscTipo" aria-label="Tipo de momento"></select>
+          <button class="btn" id="rvEscAdd"><svg class="ic"><use href="#i-plus"/></svg><span>Añadir</span></button>
+          <span class="err" id="rvEscErr" role="alert" style="margin:0"></span>
+        </div>
+      </section>
+      <div class="rv-pie" id="rvPie" hidden>
+        <span class="rv-ok" id="rvGuardado" aria-live="polite"></span>
+        <button class="btn primario" id="rvAbrirResumen"><svg class="ic"><use href="#i-eye"/></svg><span>Revisar y guardar resumen…</span></button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== LIMPIEZA ===================== -->
+  <section role="tabpanel" id="tab-limpieza" aria-labelledby="t-limpieza" hidden>
+    <div class="herramientas" style="--i:1">
+      <h2>Limpieza</h2>
+      <span class="sesion" id="limTotal"></span>
+      <button class="btn" id="limRefrescar"><svg class="ic"><use href="#i-refresh"/></svg><span>Recalcular</span></button>
+    </div>
+    <div class="glass panel" style="--i:2">
+      <p class="ayuda" style="margin:0 0 16px">Libera espacio quitando lo que ya no te sirve. Casi todo va a la papelera (recuperable);
+        solo «Vaciar papelera» borra para siempre. El buffer del canal que estés cazando nunca se toca.</p>
+      <div id="limLista" class="lim-lista"><div class="vacio">Calculando…</div></div>
+    </div>
+  </section>
+</main>
+
+<!-- Vista previa del resumen del piloto: lo que se ve es exactamente lo que se guarda -->
+<dialog id="dlgResumen" aria-labelledby="rvResH">
+  <h2 id="rvResH" style="margin:0 0 6px">Esto es exactamente lo que se guarda</h2>
+  <div class="rv-tabs" role="tablist">
+    <button class="btn" role="tab" id="rvTabLeg" aria-selected="true">Legible</button>
+    <button class="btn" role="tab" id="rvTabExa" aria-selected="false">Archivo exacto</button>
+  </div>
+  <pre id="rvVista"></pre>
+  <p class="ayuda">No incluye vídeo, audio, contraseña, identificador de cuenta ni rutas de tu PC.</p>
+  <p class="ayuda">Hypazo no lo envía a ningún sitio: tú decides si nos lo mandas.</p>
+  <p class="rv-ok" id="rvResOk" role="status"></p>
+  <div class="rv-pie"><button class="btn" id="rvVolver">Volver</button><button class="btn primario" id="rvGuardar">Guardar en este PC</button></div>
+</dialog>
+
+<!-- Editor de un clip: recortar y producir -->
+<dialog id="editor" aria-labelledby="edTitulo">
+  <div class="ed-cab">
+    <h2 id="edTitulo"></h2>
+    <button class="btn" id="edCerrar" aria-label="Cerrar editor"><svg class="ic"><use href="#i-x"/></svg><span>Cerrar</span></button>
+  </div>
+  <div class="ed-cuerpo">
+    <video id="edVideo" controls preload="metadata"></video>
+    <div class="ed-panel">
+      <div class="ed-info" id="edInfo"></div>
+      <div class="seccion">
+        <h3><svg class="ic"><use href="#i-scissors"/></svg>Recortar al gancho</h3>
+        <p>Pausa el video donde quieras y marca inicio y fin. Sale un clip nuevo; el original no se toca.</p>
+        <div class="tiempos">
+          <span class="tiempo" id="edIni">—</span><span aria-hidden="true">→</span><span class="tiempo" id="edFin">—</span>
+          <span id="edDur" style="font-size:13px"></span>
+        </div>
+        <div class="botones">
+          <button class="btn" id="edMarcaIni"><span>Marcar inicio</span></button>
+          <button class="btn" id="edMarcaFin"><span>Marcar fin</span></button>
+          <button class="btn primario" id="edCortar"><svg class="ic"><use href="#i-scissors"/></svg><span>Exportar corte</span></button>
+        </div>
+      </div>
+      <div class="seccion" id="edProd">
+        <h3><svg class="ic"><use href="#i-clapper"/></svg>Producir para TikTok</h3>
+        <p>Título gancho arriba, subtítulos palabra a palabra y tu marca. Tarda ~30-60 s.</p>
+        <label for="edTitulo2">Título gancho</label>
+        <input type="text" id="edTitulo2" maxlength="80" placeholder="Ej: AURON PIERDE LOS PAPELES">
+        <div class="dos">
+          <div>
+            <label for="edEstilo">Estilo de subtítulos</label>
+            <select id="edEstilo">
+              <option value="amarillo">Amarillo (palabra activa)</option>
+              <option value="caja">Caja negra</option>
+              <option value="minimal">Minimal</option>
+            </select>
+          </div>
+          <div style="display:flex;align-items:flex-end">
+            <label class="check" style="margin:0 0 10px"><input type="checkbox" id="edSubs" checked> Subtítulos automáticos</label>
+          </div>
+        </div>
+        <div class="botones"><button class="btn primario" id="edProducir"><svg class="ic"><use href="#i-clapper"/></svg><span>Producir</span></button></div>
+      </div>
+      <div class="err" id="edErr" role="alert"></div>
+    </div>
+  </div>
+</dialog>
+
+<div id="barra" class="glass" hidden>
+  <span class="dot vivo" aria-hidden="true"></span>
+  <span class="txt" id="barraTxt"></span>
+  <button class="btn ya" id="ya2"><svg class="ic"><use href="#i-zap"/></svg><span>¡Clip ya!</span> <kbd>F9</kbd></button>
+  <button class="btn" id="pausa2" title="Atajo: F8"><svg class="ic"><use href="#i-pause"/></svg><span>Pausar caza</span> <kbd>F8</kbd></button>
+  <button class="btn peligro" id="parar2"><svg class="ic"><use href="#i-stop"/></svg><span>Parar</span></button>
+</div>
+<div id="aviso" class="glass" role="status" aria-live="polite"></div>
+
+<script>
+const NS = "http://www.w3.org/2000/svg";
+const $ = id => document.getElementById(id);
+const el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
+const ic = nombre => { const s = document.createElementNS(NS, "svg"); s.setAttribute("class", "ic"); s.setAttribute("aria-hidden", "true");
+                       const u = document.createElementNS(NS, "use"); u.setAttribute("href", "#i-" + nombre); s.append(u); return s; };
+const setBtn = (b, icono, texto) => b.replaceChildren(...(icono ? [ic(icono)] : []), el("span", null, texto));
+const boton = (cls, icono, texto) => { const b = el("button", "btn " + cls); setBtn(b, icono, texto); return b; };
+const chip = ([icono, texto]) => { const c = el("span", "chip"); if (icono) c.append(ic(icono)); c.append(texto); return c; };
+const guardar = (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} };
+const leer = (k, d) => { try { return localStorage.getItem(k) || d; } catch (e) { return d; } };
+const quieto = matchMedia("(prefers-reduced-motion: reduce)").matches;
+let corriendo = false, canalActual = "", tab = "cazar", datos = [], firma = "";
+
+async function api(url, opts) {
+  const r = await fetch(url, opts);
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(typeof j.detail === "string" ? j.detail : "Error " + r.status);
+  return j;
+}
+const json = (method, body) => ({ method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+
+let avisoT;
+function aviso(txt, malo) {
+  const a = $("aviso"); a.replaceChildren(ic(malo ? "info" : "check"), el("span", null, txt));
+  a.classList.toggle("malo", !!malo); a.classList.add("ver");
+  clearTimeout(avisoT); avisoT = setTimeout(() => a.classList.remove("ver"), malo ? 6000 : 3500);
+}
+
+/* ---------- la firma: la aurora es el pulso del directo ---------- */
+function energia(e) { document.documentElement.style.setProperty("--e", Math.max(0, Math.min(1, e)).toFixed(2)); }
+function destello() {   // un clip cazado cruza la aurora
+  if (quieto) return;
+  const b = $("barrido"); b.classList.remove("ya"); void b.offsetWidth; b.classList.add("ya");
+}
+// brillo de cristal que sigue al ratón
+document.addEventListener("pointermove", e => {
+  const g = e.target.closest && e.target.closest(".glass");
+  if (!g || quieto) return;
+  const r = g.getBoundingClientRect();
+  g.style.setProperty("--mx", (e.clientX - r.left) + "px"); g.style.setProperty("--my", (e.clientY - r.top) + "px");
+}, { passive: true });
+
+/* ---------- pestañas ---------- */
+const TABS = ["cazar", "clips", "ajustes", "revisar", "limpieza"];
+function irA(t, animar = true) {
+  const hacer = () => {
+    tab = t;
+    for (const b of document.querySelectorAll("[role=tab]")) {
+      const on = b.dataset.tab === t; b.setAttribute("aria-selected", on); b.tabIndex = on ? 0 : -1;
+    }
+    for (const p of document.querySelectorAll("[role=tabpanel]")) p.hidden = p.id !== "tab-" + t;
+    guardar("tab", t); pintarBarra();
+    if (t === "limpieza") cargarLimpieza();
+    if (t === "revisar") cargarRevision();
+  };
+  if (animar && !quieto && document.startViewTransition) document.startViewTransition(hacer); else hacer();
+}
+for (const b of document.querySelectorAll("[role=tab]")) {
+  b.onclick = () => irA(b.dataset.tab);
+  b.onkeydown = e => {
+    const i = TABS.indexOf(b.dataset.tab), d = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
+    if (d) { const n = TABS[(i + d + TABS.length) % TABS.length]; irA(n); $("t-" + n).focus(); }
+  };
+}
+
+/* ---------- cazador ---------- */
+async function refrescarEstado() {
+  try {
+    const s = await api("/api/status");
+    corriendo = s.corriendo; canalActual = s.canal;
+    $("estado").classList.toggle("on", corriendo);
+    const vodCorriendo = corriendo && s.canal.startsWith("VOD ");
+    $("estadoTxt").textContent = corriendo ? (vodCorriendo ? "Analizando · " : "Cazando · ") + s.canal : "Parado";
+    pintarBoton(vodCorriendo);
+    $("ya").hidden = !corriendo || vodCorriendo;   // el VOD no tiene "clip ya"
+    $("pausa").hidden = !corriendo || vodCorriendo;
+    pausado = !!s.pausado; pintarPausa();
+    const log = $("log"), abajo = log.scrollTop + log.clientHeight >= log.scrollHeight - 20;
+    log.textContent = s.log.length ? s.log.join("\n") : "Sin actividad.";
+    if (abajo) log.scrollTop = log.scrollHeight;
+    ultimoLog = s.log;
+    pintarPulso(s.log);
+    pintarEnVivo(s);
+    pintarBarra();
+  } catch (e) { $("estadoTxt").textContent = "Sin conexión con la app"; }
+}
+
+/* ---------- modo en vivo (Cazar) ---------- */
+let canalCaza = "", platCaza = "twitch", clipsPrev = null;
+const plural = (n, uno, varios) => n === 1 ? uno : varios;
+const dur = s => { const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = String(s % 60).padStart(2, "0");
+                   return h ? `${h}:${String(m).padStart(2, "0")}:${x}` : `${m}:${x}`; };
+function pintarEnVivo(s) {
+  $("enVivo").hidden = !corriendo; $("formCaza").hidden = corriendo;
+  if (!corriendo) { $("sesionBox").hidden = true; clipsPrev = null; return; }
+  const m = /^(.+) \((twitch|kick)\)$/.exec(s.canal);
+  canalCaza = m ? m[1] : s.canal; platCaza = m ? m[2] : "twitch";
+  const esVod = s.canal.startsWith("VOD ");
+  // Al parar, el formulario enseña lo que se estaba cazando.
+  if (!esVod && document.activeElement !== $("canal")) { $("canal").value = canalCaza; $("plataforma").value = platCaza; }
+  const split = s.log.some(l => l.startsWith("$ ") && l.includes("--split"));
+  const deVod = esVod && s.log.map(l => /^VOD de (\S+):/.exec(l)).find(Boolean);
+  $("vivoCanal").textContent = deVod ? deVod[1] : canalCaza;
+  const sub = [[null, esVod ? "Directo ya hecho (VOD)" : platCaza === "kick" ? "Kick" : "Twitch"], [null, split ? "Formato split" : "Formato normal"]];
+  if ($("vivoSub").dataset.k !== sub.join()) { $("vivoSub").dataset.k = sub.join(); $("vivoSub").replaceChildren(...sub.map(chip)); }
+  $("vivoTiempo").textContent = dur(Math.max(0, Math.floor(Date.now() / 1000 - s.inicio)));
+  const n = +$("nSesion").textContent;
+  $("vivoClips").textContent = n; $("vivoClipsTxt").textContent = plural(n, "clip cazado", "clips cazados");
+  if (clipsPrev != null && n > clipsPrev) destello();
+  clipsPrev = n;
+  pintarSesion();
+}
+function pintarSesion() {
+  const caja = $("sesionBox");
+  if (!corriendo) { caja.hidden = true; return; }
+  const hoy = new Date().toLocaleDateString("sv");   // aaaa-mm-dd, igual que las carpetas
+  const g = datos.find(x => x.carpeta === `${hoy}_${platCaza === "kick" ? "kick_" : ""}${canalCaza}`);
+  const clips = g ? g.clips.filter(c => /^envivo_\d+\.mp4$/.test(c.nombre))
+                     .sort((a, b) => b.nombre.localeCompare(a.nombre, undefined, { numeric: true })).slice(0, 6) : [];
+  caja.hidden = !clips.length;
+  const firmaS = clips.map(c => c.nombre + c.score + c.thumb).join();
+  if (caja.dataset.firma === firmaS) return;      // sin cambios: no repintar
+  caja.dataset.firma = firmaS;
+  $("sesionClips").replaceChildren(...clips.map(c => {
+    const b = el("button", "mini"); b.title = "Abrir " + c.nombre + " en el editor";
+    if (c.thumb) { const i = el("img"); i.src = c.thumb; i.alt = ""; i.loading = "lazy"; b.append(i); }
+    if (c.score != null) b.append(scoreBadge(c.score));
+    b.append(el("span", "mini-nom", c.nombre.replace(/\.mp4$/, "")));
+    b.onclick = () => abrirEditor(g, c);
+    return b;
+  }));
+}
+
+function pintarBarra() {
+  $("barra").hidden = !(corriendo && tab !== "cazar");
+  const n = +$("nSesion").textContent;
+  $("barraTxt").textContent = `${canalActual} · ${n} ${plural(n, "clip", "clips")}`;
+}
+
+// [estado] chat normal ~94/3s, max 176 (x1.9, dispara a 30 y x1.8), max 96 personas (pide 8) | audio normal -24 dB, grito max +2 dB (dispara a +12)
+const RE_ESTADO = /chat normal ~(\d+)\/3s, max (\d+) \(x[\d.]+, dispara a (\d+) y x([\d.]+)\), max (\d+) personas \(pide (\d+)\)(?: \| audio normal (-?\d+) dB, grito max \+(\d+) dB \(dispara a \+(\d+)\))?/;
+const RE_PICO = /PICO \((\w+)\)! puntaje (\d+) \/ (\d+) personas.*score (\d+)/;
+const MOTIVO = { chat: ["chat", "chat"], audio: ["volume", "grito"], manual: ["hand", "manual"], forzado: ["hand", "forzado"] };
+
+function medidor(nombre, valor, umbral, unidad) {
+  const pct = Math.min(100, Math.round(100 * valor / Math.max(umbral, 1)));
+  const m = el("div", "medidor"), f = el("div", "fila"), dato = el("span");
+  dato.append(el("b", null, `${valor}${unidad}`), ` / ${umbral}${unidad} para disparar`);
+  f.append(el("span", null, nombre), dato);
+  const pista = el("div", "pista"), r = el("div", "relleno" + (pct >= 100 ? " dispara" : pct >= 70 ? " cerca" : ""));
+  r.style.width = pct + "%"; pista.append(r);
+  pista.setAttribute("role", "meter"); pista.setAttribute("aria-label", nombre);
+  pista.setAttribute("aria-valuenow", pct); pista.setAttribute("aria-valuemin", 0); pista.setAttribute("aria-valuemax", 100);
+  m.append(f, pista); return m;
+}
+
+function pintarPulso(log) {
+  const nClips = log.filter(l => l.includes("CLIP GUARDADO")).length;
+  $("nSesion").textContent = nClips;
+  $("nSesionTxt").textContent = plural(nClips, "clip en esta sesión", "clips en esta sesión");
+  const est = [...log].reverse().find(l => RE_ESTADO.test(l));
+  const caja = $("pulso");
+  const vodLog = log.some(l => l.startsWith("$ vod.py"));
+  const verVod = corriendo ? vodLog : modoCaza === "vod";
+  $("tituloPulso").textContent = verVod ? "Análisis del VOD" : "Pulso del directo";
+  if (verVod) { pintarPasosVod(vodLog ? log : []); return; }
+  if (!est) {
+    energia(corriendo ? .3 : .15);
+    const v = el("div", "vacio-pulso"); v.append(ic("activity"), corriendo
+      ? "Midiendo… el primer resumen llega a los 30 s (los primeros 30 s no se dispara: está aprendiendo qué es normal)."
+      : "Arranca el cazador para ver cómo de cerca está cada momento de convertirse en clip.");
+    caja.replaceChildren(v);
+    return;
+  }
+  const [, normal, max, piso, factor, gente, pide, audioN, grito, gritoUmbral] = RE_ESTADO.exec(est);
+  const umbralChat = Math.max(+piso, Math.ceil(+normal * +factor));
+  // la aurora sube con lo cerca que está el chat de disparar
+  energia(corriendo ? .2 + .8 * Math.min(1, +max / umbralChat) : .15);
+  const meds = el("div", "medidores");
+  meds.append(medidor("Chat (pico de los últimos 30 s)", +max, umbralChat, ""),
+              medidor("Personas distintas", +gente, +pide, ""));
+  if (audioN != null) meds.append(medidor("Grito del streamer", +grito, +gritoUmbral, " dB"));
+  const normalTxt = el("div", "normal-txt", `Normal del directo: chat ~${normal}/3 s` + (audioN != null ? ` · volumen ${audioN} dB` : ""));
+  const nodos = [meds, normalTxt];
+  const pico = [...log].reverse().find(l => RE_PICO.test(l));
+  if (pico) {
+    const [, motivo, p, per, score] = RE_PICO.exec(pico);
+    const u = el("div", "ultimo");
+    u.append(el("span", null, "Último clip"), chip(["star", "score " + score]), chip(MOTIVO[motivo] || [null, motivo]),
+             chip(["flame", "chat " + p]), chip(["users", per + " personas"]));
+    nodos.push(u);
+  }
+  caja.replaceChildren(...nodos);
+}
+
+/* ---------- modo: en directo / directo ya hecho (VOD) ---------- */
+let modoCaza = leer("modo", "vivo") === "vod" ? "vod" : "vivo", ultimoLog = [];
+function pintarBoton(vodCorriendo) {
+  const btn = $("btn"), k = corriendo ? (vodCorriendo ? "parar-vod" : "parar") : modoCaza;
+  if (btn.dataset.modo === k) return;      // solo si cambia: no rehacer el botón cada 2 s
+  btn.dataset.modo = k;
+  const [icono, txt] = { parar: ["stop", "Parar cazador"], "parar-vod": ["stop", "Parar el análisis"],
+                         vivo: ["play", "Empezar a cazar"], vod: ["zap", "Sacar los mejores momentos"] }[k];
+  setBtn(btn, icono, txt);
+  btn.classList.toggle("primario", !corriendo); btn.classList.toggle("peligro", corriendo);
+}
+function ponerModo(m) {
+  modoCaza = m; guardar("modo", m); marcar("modo", m);
+  $("formCaza").classList.toggle("es-vod", m === "vod"); $("campoVod").hidden = m !== "vod";
+  $("tituloCaza").textContent = m === "vod" ? "Mejores momentos de un VOD" : "Cazador automático";
+  $("err").textContent = "";
+  pintarBoton(false);
+  if (!corriendo) pintarPulso(ultimoLog);
+}
+for (const b of $("modo").querySelectorAll("button")) b.onclick = () => ponerModo(b.dataset.v);
+
+// El panel de la derecha, en modo VOD: los 4 pasos, con el que está en marcha resaltado.
+const PASOS_VOD = [["Repetición del chat", "cada mensaje con su segundo exacto"],
+                   ["Puntuar el directo entero", "chat sobre lo normal y gente distinta"],
+                   ["Gritos y risas", "solo alrededor de los mejores candidatos"],
+                   ["Cortar los clips", "solo esos trozos, sin bajar el VOD entero"]];
+function pintarPasosVod(log) {
+  const ult = n => [...log].reverse().find(l => l.trimStart().startsWith(n));
+  const actual = Math.max(0, ...log.map(l => +((/^(\d)\/4 /.exec(l) || [])[1] || 0)));
+  const fin = log.some(l => l.startsWith("Listo.") || l.startsWith("[proceso terminado"));
+  const corte = (ult("[") || "").match(/\[(\d+)\/(\d+)\] momento (\S+), score (\d+)/);
+  const detalle = { 1: ult("chat: "), 4: corte && `Clip ${corte[1]} de ${corte[2]} · minuto ${corte[3]} · score ${corte[4]}` };
+  energia(corriendo ? .5 : .15);
+  const intro = el("div", "normal-txt", !log.length
+    ? "Pega el enlace de un directo ya terminado y saco sus mejores momentos comparándolos entre sí."
+    : fin ? "Análisis terminado: los clips están en la galería." : "Analizando…");
+  const ol = el("ol", "pasos-vod");
+  PASOS_VOD.forEach(([t, sub], i) => {
+    const n = i + 1, li = el("li", fin || n < actual ? "hecho" : n === actual ? "activo" : "");
+    const txt = el("span", null, t); txt.append(el("small", null, (n === actual && detalle[n] ? detalle[n].trim() : sub)));
+    li.append(el("b", null, String(n)), txt); ol.append(li);
+  });
+  const err = log.length && [...log].reverse().find(l => /^(De momento|No |Este VOD|yt-dlp|RuntimeError)/.test(l));
+  $("pulso").replaceChildren(intro, ol, ...(err ? [el("div", "err", err)] : []));
+}
+
+async function arrancarOParar() {
+  const btn = $("btn"); btn.disabled = true; $("err").textContent = "";
+  try {
+    if (corriendo) await api("/api/stop", { method: "POST" });
+    else if (modoCaza === "vod") {
+      await api("/api/vod", json("POST", {
+        url: $("vodUrl").value.trim(), n: +$("vodN").value, credito: $("credito").value.trim(), split: $("split").checked,
+        factor: +$("factor").value, unicos: +$("unicos").value, remate: +$("postroll").value, audio: +$("audio").value,
+      }));
+      guardar("vodUrl", $("vodUrl").value.trim());
+    }
+    else await api("/api/start", json("POST", {
+      canal: $("canal").value.trim(), plataforma: $("plataforma").value, credito: $("credito").value.trim(), split: $("split").checked,
+      piso: +$("piso").value, factor: +$("factor").value, unicos: +$("unicos").value, postroll: +$("postroll").value, audio: +$("audio").value,
+    }));
+  } catch (e) { $("err").textContent = e.message; aviso(e.message, true); }
+  await refrescarEstado(); btn.disabled = false;
+}
+$("btn").onclick = arrancarOParar;
+$("parar2").onclick = () => corriendo && arrancarOParar();
+
+async function clipYa() {
+  if (!corriendo) return;
+  try {
+    await api("/api/clip-ya", { method: "POST" });
+    for (const b of [$("ya"), $("ya2")]) { b.classList.add("flash"); setTimeout(() => b.classList.remove("flash"), 600); }
+    aviso("Clip pedido: sale en unos segundos (espera el remate).");
+  } catch (e) { aviso(e.message, true); }
+}
+$("ya").onclick = $("ya2").onclick = clipYa;
+
+
+/* ---------- Revisar (piloto de Hypazo): etiquetas, descartes, parejas y resumen ---------- */
+const ETIQ = ["callado", "frase", "jugada", "risa", "otro"];
+const ORIGEN_TXT = { automatico: "Automático", manual: "Manual (F9)", forzado: "Forzado" };
+let rv = null, rvSid = "";
+const aSeg = txt => { const m = /^(\d{1,2}):([0-5]\d):([0-5]\d)$/.exec(txt.trim()); return m ? +m[1] * 3600 + +m[2] * 60 + +m[3] : null; };
+const hmsTxt = s => [Math.floor(s / 3600), Math.floor(s % 3600 / 60), s % 60].map(n => String(n).padStart(2, "0")).join(":");
+
+async function cargarRevision() {
+  try {
+    const ses = await api("/api/revision/sesiones"), sel = $("rvSesion");
+    sel.replaceChildren(...ses.map(s => { const o = el("option", null,
+      `${s.canal} (${s.plataforma}) · ${s.duracion || "duración desconocida"} · ${s.n_clips} ${plural(s.n_clips, "clip", "clips")}`);
+      o.value = s.id; return o; }));
+    if (!ses.length) { rv = null; $("rvLista").replaceChildren(el("div", "vacio", "Aún no hay sesiones del piloto: caza un directo y vuelve aquí."));
+                       $("rvEscapa").hidden = $("rvPie").hidden = true; $("rvCabecera").textContent = ""; return; }
+    if (!ses.some(s => s.id === rvSid)) rvSid = ses[0].id;
+    sel.value = rvSid;
+    await pintarRevision();
+  } catch (e) { $("rvAviso").textContent = e.message; }
+}
+
+async function pintarRevision() {
+  rv = await api("/api/revision/sesion/" + rvSid);
+  const s = rv.sesion, cortes = s.cortes.length;
+  $("rvCabecera").replaceChildren(`${rv.clips.length} ${plural(rv.clips.length, "clip", "clips")} · ${cortes} ${plural(cortes, "corte", "cortes")}` +
+    s.cortes.map(k => ` (${k.en}, ${Math.round(k.dura_s / 60)} min)`).join("") + " · ",
+    el("span", s.inicio === "completo" ? null : "warn", { completo: "Inicio completo", parcial: "Inicio parcial: la caza empezó con el directo ya en marcha",
+      desconocido: "La plataforma no dio la hora de inicio: los tiempos salen como desconocidos" }[s.inicio]));
+  $("rvAviso").textContent = rv.aviso || "";
+  const porId = Object.fromEntries(rv.clips.map(c => [c.id, c])), dentro = new Set(Object.values(rv.parejas).map(p => p.con));
+  const lista = $("rvLista"); lista.replaceChildren();
+  if (!rv.clips.length) lista.append(el("div", "vacio", "Esta sesión no tiene clips (o se movieron a la papelera)."));
+  for (const c of rv.clips) {
+    if (dentro.has(c.id)) continue;                         // se pinta dentro de su pareja
+    const p = rv.parejas[c.id];
+    if (!p) { lista.append(tarjetaRv(c)); continue; }
+    const a = porId[p.con], ini = Math.min(a.ventana[0], c.ventana[0]), tot = Math.max(a.ventana[1], c.ventana[1]) - ini;
+    const pct = x => (x - ini) / tot * 100, barra = el("div", "rv-barra"); barra.setAttribute("aria-hidden", "true");
+    for (const [v, color, top] of [[a.ventana, "var(--cyan)", 0], [c.ventana, "var(--warn)", 6]]) {
+      const i = el("i"); i.style.cssText = `left:${pct(v[0])}%;width:${pct(v[1]) - pct(v[0])}%;top:${top}px;background:${color}`; barra.append(i);
+    }
+    const sep = el("button", "rv-link", "Son dos momentos distintos"); sep.onclick = () => accionRv({ accion: "deshacer_pareja", clip: c.id });
+    const cab = el("div", "rv-top"); cab.append(el("span", "rv-meta", `Emparejados: se solapan ${Math.round(p.solape)} s → cuentan como el mismo momento`), sep);
+    const par = el("div", "rv-par"); par.append(cab, tarjetaRv(a), tarjetaRv(c), el("div", "rv-meta", "Ventanas de 45 s en el directo (cian: automático, amarillo: manual)"), barra);
+    lista.append(par);
+  }
+  const esc = $("rvEscapados"); esc.replaceChildren();
+  rv.estado.escapados.forEach((e, i) => { const q = boton("", "x", "Quitar"); q.onclick = () => accionRv({ accion: "escapado_quitar", i });
+    const f = el("div", "rv-fila"); f.append(el("span", null, `≈ ${hmsTxt(e.t_s)} · ${e.tipo}`), q); esc.append(f); });
+  $("rvEscapa").hidden = $("rvPie").hidden = false;
+}
+
+function tarjetaRv(c) {
+  const desc = c.decision === "descartar", info = el("div", "rv-info"), top = el("div", "rv-top");
+  top.append(el("span", "rv-t", c.tiempo), el("span", "rv-o " + c.origen, ORIGEN_TXT[c.origen] || c.origen));
+  if (c.origen === "forzado" && c.decision === "pendiente") top.append(el("span", "rv-o pend", "Pendiente"));
+  if (desc) top.append(el("span", "rv-o gris", "Descartado"));
+  info.append(top);
+  if (!desc) {
+    const tags = el("div", "rv-tags"); tags.setAttribute("role", "group"); tags.setAttribute("aria-label", "Etiqueta");
+    const actual = rv.estado.etiquetas[c.id];
+    for (const t of ETIQ) { const b = el("button", "rv-tag", t); b.setAttribute("aria-pressed", String(actual === t));
+      b.onclick = () => accionRv({ accion: "etiqueta", clip: c.id, valor: actual === t ? null : t }); tags.append(b); }
+    info.append(tags);
+  }
+  const link = (txt, cuerpo) => { const b = el("button", "rv-link", txt); b.onclick = () => accionRv(cuerpo); return b; };
+  if (c.origen === "automatico" || c.origen === "manual") {
+    if (desc) info.append(el("div", "rv-meta", c.origen === "automatico" ? "Se excluye del resumen; solo suma al recuento de automáticos descartados. El vídeo se conserva." : "Se excluye del resumen. El vídeo se conserva."),
+                          link("Deshacer", { accion: "decidir", clip: c.id, valor: "conservar" }));
+    else info.append(link(c.origen === "automatico" ? "Descartar (no era un momento)" : "Descartar", { accion: "decidir", clip: c.id, valor: "descartar" }));
+  }
+  if (c.origen === "manual" && !rv.parejas[c.id] && !desc) {
+    const deshecho = rv.estado.deshechos.includes(c.id), m = el("div", "rv-meta");
+    m.append(deshecho ? "Separado a mano del automático → cuenta como " : "Ningún automático se solapa → cuenta como ", el("b", null, "se escapó"));
+    info.append(m); if (deshecho) info.append(link("Volver a emparejar", { accion: "rehacer_pareja", clip: c.id }));
+  }
+  if (c.origen === "forzado") {
+    const seg = el("div", "rv-seg"); seg.setAttribute("role", "group"); seg.setAttribute("aria-label", "Decisión sobre el clip forzado");
+    for (const [v, txt] of [["aprobar", "Aprobar"], ["descartar", "Descartar"], ["pendiente", "Dejar pendiente"]]) {
+      const b = el("button", null, txt); b.setAttribute("aria-pressed", String(c.decision === v));
+      b.onclick = () => accionRv({ accion: "decidir", clip: c.id, valor: v }); seg.append(b); }
+    info.append(seg, el("div", "rv-seguro", "Ninguna de estas opciones borra el vídeo."),
+                el("div", "rv-meta", "Descartar: se excluye del resumen, pero el vídeo se conserva en este PC."));
+  }
+  const v = el("video"); v.src = c.url; v.controls = true; v.preload = "metadata"; v.playsInline = true;
+  v.setAttribute("aria-label", "Clip de " + c.tiempo);
+  const card = el("div", "rv-clip" + (desc ? " descartado" : "")); card.append(v, info); return card;
+}
+
+async function accionRv(cuerpo) {
+  try { await api("/api/revision/sesion/" + rvSid, json("POST", cuerpo)); $("rvGuardado").textContent = "✓ Cambios guardados"; await pintarRevision(); }
+  catch (e) { aviso(e.message, true); }
+}
+
+$("rvSesion").onchange = () => { rvSid = $("rvSesion").value; $("rvGuardado").textContent = ""; pintarRevision().catch(e => aviso(e.message, true)); };
+$("rvRefrescar").onclick = cargarRevision;
+$("rvEscTipo").replaceChildren(...ETIQ.map(t => { const o = el("option", null, t); o.value = t; return o; }));
+$("rvEscAdd").onclick = () => {
+  const t = aSeg($("rvEscT").value);
+  if (t === null) { $("rvEscErr").textContent = "Escribe el tiempo como HH:MM:SS."; return; }
+  $("rvEscErr").textContent = ""; $("rvEscT").value = "";
+  accionRv({ accion: "escapado_añadir", t_s: t, tipo: $("rvEscTipo").value });
+};
+let rvTextos = null;
+function verResumen(exacto) {
+  $("rvVista").textContent = exacto ? rvTextos.exacto : rvTextos.legible;
+  $("rvTabLeg").setAttribute("aria-selected", String(!exacto)); $("rvTabExa").setAttribute("aria-selected", String(exacto));
+}
+$("rvAbrirResumen").onclick = async () => {
+  try { rvTextos = await api("/api/revision/resumen/" + rvSid); $("rvResOk").textContent = ""; $("rvGuardar").disabled = false;
+        verResumen(false); $("dlgResumen").showModal(); }
+  catch (e) { aviso(e.message, true); }
+};
+$("rvTabLeg").onclick = () => verResumen(false);
+$("rvTabExa").onclick = () => verResumen(true);
+$("rvVolver").onclick = () => $("dlgResumen").close();
+$("rvGuardar").onclick = async () => {
+  try { const r = await api(`/api/revision/resumen/${rvSid}/guardar`, { method: "POST" });
+        $("rvResOk").textContent = `Guardado en este PC como ${r.guardado} (carpeta salida/_resumenes). No se ha enviado a ningún sitio.`;
+        $("rvGuardar").disabled = true; }
+  catch (e) { aviso(e.message, true); }
+};
+
+/* ---------- pausa de la caza automática (F8): durante la pausa, Clip ya = forzado ---------- */
+let pausado = false;
+function pintarPausa() {
+  for (const b of [$("pausa"), $("pausa2")]) {
+    b.replaceChildren(ic(pausado ? "play" : "pause"), el("span", null, pausado ? "Reanudar caza" : "Pausar caza"), " ", el("kbd", null, "F8"));
+    b.setAttribute("aria-pressed", String(pausado));
+  }
+  $("pausaNota").hidden = !(corriendo && pausado);
+}
+async function alternarPausa() {
+  if (!corriendo) return;
+  try {
+    const r = await api(pausado ? "/api/reanudar" : "/api/pausa", { method: "POST" });
+    pausado = r.pausado; pintarPausa();
+    aviso(pausado ? "Caza automática en pausa: “¡Clip ya!” guardará un clip forzado." : "Caza automática reanudada.");
+  } catch (e) { aviso(e.message, true); }
+}
+$("pausa").onclick = $("pausa2").onclick = alternarPausa;
+document.addEventListener("keydown", e => {
+  if (e.key.toLowerCase() === "c" && !e.ctrlKey && !e.metaKey && !e.altKey && !e.repeat
+      && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) clipYa();
+});
+
+/* ---------- detección fácil: tres decisiones en vez de cinco números ---------- */
+// Equilibrada = los valores afinados en las sesiones reales (Twitch: piso 40; Kick: westcol
+// 20-65/3s y 35-58 personas -> piso 30). Selectiva/Generosa suben o bajan las tres exigencias.
+const SENS = {
+  twitch: { selectiva: { piso: 60, factor: 2.2, unicos: 14 }, equilibrada: { piso: 40, factor: 1.8, unicos: 10 },
+            generosa: { piso: 25, factor: 1.5, unicos: 6 } },
+  kick:   { selectiva: { piso: 45, factor: 2.2, unicos: 12 }, equilibrada: { piso: 30, factor: 1.8, unicos: 8 },
+            generosa: { piso: 18, factor: 1.5, unicos: 5 } },
+};
+const GRITO_DB = 12;
+function marcar(grupo, valor) {
+  for (const b of $(grupo).querySelectorAll("button")) b.setAttribute("aria-checked", b.dataset.v === String(valor));
+}
+function aplicarSens(nivel) {
+  const v = SENS[$("plataforma").value][nivel];
+  $("piso").value = v.piso; $("factor").value = v.factor; $("unicos").value = v.unicos;
+  marcar("sens", nivel); $("sensPers").hidden = true; guardar("sens", nivel);
+}
+function aplicarRemate(s) { $("postroll").value = s; marcar("remate", s); guardar("remate", s); }
+for (const b of $("sens").querySelectorAll("button")) b.onclick = () => aplicarSens(b.dataset.v);
+for (const b of $("remate").querySelectorAll("button")) b.onclick = () => aplicarRemate(b.dataset.v);
+$("gritos").onchange = () => { $("audio").value = $("gritos").checked ? GRITO_DB : 0; guardar("gritos", $("gritos").checked ? "1" : "0"); };
+$("plataforma").onchange = () => { const n = leer("sens", "equilibrada"); if ($("sensPers").hidden) aplicarSens(n); };
+// Tocar un número a mano = ajuste personalizado (los botones dejan de marcar un nivel).
+for (const id of ["piso", "factor", "unicos"]) $(id).addEventListener("input", () => { marcar("sens", ""); $("sensPers").hidden = false; });
+$("postroll").addEventListener("input", () => marcar("remate", ""));
+$("audio").addEventListener("input", () => { $("gritos").checked = +$("audio").value > 0; });
+aplicarSens(leer("sens", "equilibrada"));
+aplicarRemate(leer("remate", "7"));
+$("gritos").checked = leer("gritos", "1") === "1"; $("audio").value = $("gritos").checked ? GRITO_DB : 0;
+$("vodUrl").value = leer("vodUrl", "");
+ponerModo(modoCaza);
+
+/* ---------- galeria ---------- */
+// Los videos se cargan al acercarse a la pantalla y se sueltan al alejarse (Chrome limita ~75 reproductores).
+const visor = new IntersectionObserver(es => {
+  for (const { target: v, isIntersecting } of es) {
+    if (isIntersecting) {
+      if (v.dataset.poster && !v.getAttribute("poster")) v.poster = v.dataset.poster;
+      if (!v.getAttribute("src")) v.src = v.dataset.src;   // con preload=none no baja hasta dar play
+    }
+    else if (v.getAttribute("src") && v.paused) { v.removeAttribute("src"); v.load(); }
+  }
+}, { rootMargin: "600px" });
+
+async function refrescarClips(forzar) {
+  const grupos = await api("/api/clips");
+  const f = JSON.stringify(grupos);
+  if (f === firma && !forzar) return;   // sin cambios: no re-renderizar (cortaría el video que ves)
+  firma = f; datos = grupos; pintarGaleria();
+  const pend = grupos.reduce((n, g) => n + g.clips.filter(c => pasaFiltro(g, c, "pend")).length, 0);
+  $("nPend").hidden = !pend; $("nPend").textContent = pend;
+  pintarSesion();
+}
+
+// Flujo de terminados: producir -> PARA SUBIR -> "ya lo subí" -> SUBIDOS.
+const PARA = "PARA SUBIR", SUBIDOS = "SUBIDOS";
+function pasaFiltro(g, c, filtro) {
+  const esPara = g.carpeta === PARA, esSubido = g.carpeta === SUBIDOS, crudo = !esPara && !esSubido;
+  switch (filtro) {
+    case "todos": return true;
+    case "pend": return esPara || (crudo && !c.estado);   // por revisar + por subir
+    case "para": return esPara;
+    case "subidos": return esSubido;
+    default: return crudo && c.estado === filtro;          // buenos / descartados (crudos)
+  }
+}
+/* ---------- descripcion + hashtags para TikTok (sin servicios externos) ---------- */
+// Pocos y relevantes rinden mas que muchos genericos: streamer, juego, contenido, plataforma, alcance.
+const ALIAS = { rubius: ["rubius", "elrubius"], auronplay: ["auronplay", "auron"], illojuan: ["illojuan"],
+                ibai: ["ibai", "ibaillanos"], juansguarnizo: ["juansguarnizo"], westcol: ["westcol"] };
+const JUEGOS = [   // se buscan en el titulo del directo
+  [/gta\s*(vi|6)\b/i, ["gta6", "gtavi"]], [/\bgta\b/i, ["gta"]], [/minecraft/i, ["minecraft"]],
+  [/fortnite/i, ["fortnite"]], [/valorant/i, ["valorant"]], [/league of legends/i, ["leagueoflegends"]],
+  [/\b(ea ?fc|fifa)\b/i, ["eafc"]], [/warzone/i, ["warzone"]], [/\bcs2\b|counter.?strike/i, ["cs2"]],
+  [/roblox/i, ["roblox"]], [/among us/i, ["amongus"]], [/elden ring/i, ["eldenring"]],
+  [/\brust\b/i, ["rust"]], [/pok[eé]mon/i, ["pokemon"]], [/\birl\b|just chatting|charlando/i, ["irl"]],
+];
+const CONTENIDO = [   // en el titulo del clip y lo que mas se repitio en el chat
+  [/(ja){2,}|jsjs|\bxd+\b|kekw|lmao|risa|omegalul/i, ["humor", "risas"]],
+  [/susto|miedo|terror|scream/i, ["terror"]], [/\bgol(azo)?\b|f[uú]tbol/i, ["futbol"]],
+  [/\bfail\b|ca[ií]da|mancada/i, ["fail"]], [/rage|enfad|furia/i, ["rage"]],
+];
+const tag = s => "#" + s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9ñ]/g, "");
+function origenDe(g, c) {
+  const m = /^\d{4}-\d{2}-\d{2}_(kick_)?(.+)$/.exec(c.origen || g.carpeta);
+  return { canal: c.canal || (m ? m[2] : ""), plat: c.plataforma || (m && m[1] ? "kick" : "twitch") };
+}
+function hashtags(g, c) {
+  const { canal, plat } = origenDe(g, c), out = [];
+  const meter = lista => { for (const t of lista) { const h = tag(t); if (h.length > 1 && !out.includes(h)) out.push(h); } };
+  if (canal) meter(ALIAS[canal] || [canal]);
+  const juego = JUEGOS.find(([re]) => re.test(c.directo || "")); if (juego) meter(juego[1]);
+  const texto = [c.titulo || "", ...(c.top_chat || []).map(([t]) => t)].join(" ");
+  for (const [re, tags] of CONTENIDO) if (re.test(texto)) { meter(tags); break; }
+  meter([plat === "kick" ? "kickclips" : "twitchclips", "fyp", "parati"]);
+  return out.slice(0, 8);
+}
+function descripcion(g, c) {
+  const { canal, plat } = origenDe(g, c);
+  return [c.titulo ? c.titulo.toUpperCase() : "",
+          canal ? `🎥 @${canal} en ${plat === "kick" ? "Kick" : "Twitch"}` : "",
+          hashtags(g, c).join(" ")].filter(Boolean).join("\n");
+}
+async function copiar(txt) {
+  try { await navigator.clipboard.writeText(txt); return true; }
+  catch (e) {   // por si el navegador no deja usar el portapapeles moderno
+    const t = el("textarea"); t.value = txt; document.body.append(t); t.select();
+    const ok = document.execCommand("copy"); t.remove(); return ok;
+  }
+}
+
+async function abrirCarpeta(carpeta) {
+  try { await api("/api/abrir-carpeta", json("POST", { carpeta })); aviso("Abierta en el Explorador: " + carpeta); }
+  catch (e) { aviso(e.message, true); }
+}
+
+async function accion(url, body, ok) {
+  try { const r = await api(url, json("POST", body)); await refrescarClips(true); if (ok) aviso(ok); return r; }
+  catch (e) { aviso(e.message, true); }
+}
+
+const nivel = s => s >= 70 ? " alto" : s >= 50 ? " medio" : "";
+const scoreBadge = s => { const b = el("span", "score" + nivel(s)); b.append(ic("star"), String(s)); b.title = "Score " + s; return b; };
+
+function chips(c) {   // [icono, texto]
+  const out = [];
+  if (c.motivo && MOTIVO[c.motivo]) out.push(MOTIVO[c.motivo]);
+  if (c.puntaje != null) out.push(["flame", String(c.puntaje)], ["users", String(c.personas)]);
+  if (c.grito_db) out.push(["volume", `+${c.grito_db} dB`]);
+  if (c.de && !c.producido) out.push(["scissors", "corte"]);
+  if (c.puntaje == null && !c.producido) out.push([null, "sin datos de reacción"]);
+  return out;
+}
+
+function tarjeta(g, c) {
+  const ref = { carpeta: g.carpeta, nombre: c.nombre };
+  const card = el("article", "clip " + (c.estado || ""));
+  const media = el("div", "media");
+  const v = el("video"); v.dataset.src = c.url; v.controls = true;
+  v.preload = c.thumb ? "none" : "metadata";   // con portada, el video solo baja al dar play
+  if (c.thumb) v.dataset.poster = c.thumb;
+  v.setAttribute("aria-label", "Clip " + c.nombre); visor.observe(v);
+  media.append(v);
+  if (c.score != null) media.append(scoreBadge(c.score));
+  if (c.producido) { const t = el("span", "tag"); t.append(ic("clapper"), "TikTok"); media.append(t); }
+  const cuerpo = el("div", "cuerpo");
+  // Terminados: el título dice más que el nombre largo; el nombre, al pasar el ratón.
+  const etiqueta = c.producido ? (c.titulo ? c.titulo.toUpperCase() : (c.origen || "") + " · " + (c.de || "")).trim()
+                               : c.nombre.replace(/\.mp4$/, "") + " · " + c.mb + " MB";
+  const nom = el("div", "nombre" + (c.producido ? " titulo-clip" : ""), etiqueta); nom.title = c.nombre;
+  cuerpo.append(nom);
+  const ch = el("div", "chips"); ch.append(...chips(c).map(chip));
+  cuerpo.append(ch);
+  const top = (c.top_chat || []).slice(0, 3).map(([t, n]) => n > 1 ? `${t} ×${n}` : t).join(" · ");
+  if (top) { const l = el("div", "chatline"); l.append(ic("chat"), el("span", null, top)); cuerpo.append(l); }
+  const acc = el("div", "fila-acc");
+  const editar = boton("primario b-edit", "pencil", "Editar");
+  editar.onclick = () => abrirEditor(g, c);
+  const tira = boton("b-tira", "trash", ""); tira.replaceChildren(ic("trash"));
+  tira.setAttribute("aria-label", "Mover a la papelera"); tira.title = "Mover a la papelera";
+  tira.onclick = () => confirm(`¿Mover ${c.nombre} a la papelera?\n(queda en salida/_papelera, recuperable)`)
+    && accion("/api/clip/borrar", ref, "Movido a la papelera.");
+  if (g.carpeta === PARA || g.carpeta === SUBIDOS) {      // clip terminado: copiar, subir / deshacer
+    const subir = g.carpeta === PARA;
+    cuerpo.append(el("div", "tags", hashtags(g, c).join(" ")));
+    const copiarBtn = boton("primario b-copiar", "copy", "Copiar descripción");
+    copiarBtn.onclick = async () => {
+      const txt = descripcion(g, c);
+      if (await copiar(txt)) aviso("Copiada. Pégala en TikTok:\n" + txt);
+      else aviso("No pude copiar al portapapeles.", true);
+    };
+    const mov = boton("b-subido" + (subir ? " si" : ""), subir ? "upload" : "undo", subir ? "Ya lo subí" : "No lo subí");
+    mov.onclick = () => accion("/api/clip/mover", { ...ref, destino: subir ? SUBIDOS : PARA },
+      subir ? "Movido a SUBIDOS." : "De vuelta en PARA SUBIR.");
+    acc.append(copiarBtn, mov, tira);
+    cuerpo.append(acc); card.append(media, cuerpo);
+    return card;
+  }
+  const bueno = boton("b-bueno" + (c.estado === "bueno" ? " si" : ""), "check", "Bueno");
+  bueno.setAttribute("aria-pressed", c.estado === "bueno");
+  bueno.onclick = () => accion("/api/clip/estado", { ...ref, estado: c.estado === "bueno" ? "" : "bueno" });
+  const malo = boton("b-desc", c.estado === "descartado" ? "undo" : "x", c.estado === "descartado" ? "Volver" : "Descartar");
+  malo.onclick = () => accion("/api/clip/estado", { ...ref, estado: c.estado === "descartado" ? "" : "descartado" });
+  acc.append(bueno, malo, tira, editar);
+  cuerpo.append(acc);
+  card.append(media, cuerpo);
+  return card;
+}
+
+function pintarGaleria() {
+  const filtro = $("filtro").value, orden = $("orden").value, gal = $("galeria");
+  visor.disconnect(); gal.replaceChildren();
+  let mostrados = 0;
+  for (const g of datos) {
+    let clips = g.clips.filter(c => pasaFiltro(g, c, filtro));
+    // score primero; los clips viejos sin score, por puntaje de chat detrás.
+    if (orden === "reaccion") clips = [...clips].sort((a, b) => ((b.score ?? -1) - (a.score ?? -1)) || ((b.puntaje ?? -1) - (a.puntaje ?? -1)));
+    if (!clips.length) continue;
+    mostrados += clips.length;
+    const esPara = g.carpeta === PARA;
+    const sec = el("section", "grupo" + (esPara ? " para" : ""));
+    const h = el("h3");
+    if (esPara) h.append(ic("clapper"));
+    h.append(esPara ? "Para subir" : g.carpeta === SUBIDOS ? "Subidos" : g.carpeta,
+             el("small", null, clips.length + (clips.length === 1 ? " clip" : " clips")));
+    const abrir = boton("", "folder", "Abrir carpeta"); abrir.onclick = () => abrirCarpeta(g.carpeta);
+    h.append(abrir); sec.append(h);
+    if (esPara) sec.append(el("p", "pista-grupo", "Listos para TikTok. Ábrelos en el Explorador y arrástralos a TikTok; luego márcalos como subidos."));
+    const grid = el("div", "grid"); grid.append(...clips.map(c => tarjeta(g, c)));
+    sec.append(grid); gal.append(sec);
+  }
+  if (!mostrados) {
+    const v = el("div", "vacio");
+    if (datos.length) {
+      v.append(el("b", null, "Nada en este filtro"), "Prueba con «Todos» o cambia de filtro.");
+    } else {
+      v.append(el("b", null, "Aún no hay clips"), "Arranca el cazador y aparecerán aquí solos.");
+      const ir = boton("primario", "target", "Ir a Cazar"); ir.onclick = () => irA("cazar");
+      v.append(el("br"), ir);
+    }
+    gal.append(v);
+  }
+}
+$("filtro").onchange = $("orden").onchange = pintarGaleria;
+
+/* ---------- editor ---------- */
+let edRef = null, edIni = null, edFin = null;
+const fmt = t => t == null ? "—" : t.toFixed(1) + " s";
+function pintarCorte() {
+  $("edIni").textContent = fmt(edIni); $("edFin").textContent = fmt(edFin);
+  const a = edIni ?? 0, b = edFin ?? $("edVideo").duration;
+  $("edDur").textContent = (edIni != null || edFin != null) && b > a ? `(${(b - a).toFixed(1)} s)` : "";
+}
+function abrirEditor(g, c) {
+  edRef = { carpeta: g.carpeta, nombre: c.nombre }; edIni = edFin = null;
+  $("edTitulo").textContent = g.carpeta + " / " + c.nombre;
+  $("edVideo").poster = c.thumb || ""; $("edVideo").src = c.url; $("edErr").textContent = "";
+  const info = $("edInfo"); info.replaceChildren();
+  if (c.score != null) info.append(chip(["star", "score " + c.score]));
+  info.append(...chips(c).map(chip));
+  $("edProd").hidden = !!c.producido;
+  $("edTitulo2").value = ""; $("edEstilo").value = leer("estilo", "amarillo");
+  pintarCorte();
+  $("editor").showModal();
+}
+$("edCerrar").onclick = () => $("editor").close();
+$("editor").addEventListener("close", () => { const v = $("edVideo"); v.pause(); v.removeAttribute("src"); v.load(); });
+$("edVideo").addEventListener("loadedmetadata", pintarCorte);
+$("edMarcaIni").onclick = () => { edIni = $("edVideo").currentTime; pintarCorte(); };
+$("edMarcaFin").onclick = () => { edFin = $("edVideo").currentTime; pintarCorte(); };
+$("edEstilo").onchange = () => guardar("estilo", $("edEstilo").value);
+
+async function trabajo(btn, texto, url, body, ok) {
+  $("edErr").textContent = "";
+  const antes = [...btn.childNodes]; btn.disabled = true; btn.replaceChildren(el("span", null, texto));
+  try {
+    const r = await api(url, json("POST", body));
+    $("editor").close(); await refrescarClips(true); aviso(ok(r));
+  } catch (e) { $("edErr").textContent = e.message; }
+  btn.disabled = false; btn.replaceChildren(...antes);
+}
+$("edCortar").onclick = () => {
+  const a = edIni ?? 0, b = edFin ?? $("edVideo").duration;
+  if (!(b > a)) { $("edErr").textContent = "El fin tiene que ir después del inicio."; return; }
+  trabajo($("edCortar"), "Exportando…", "/api/clip/cortar", { ...edRef, ini: a, fin: b }, r => `Corte creado: ${r.nombre}`);
+};
+$("edProducir").onclick = () => trabajo($("edProducir"), "Produciendo… (~1 min)", "/api/clip/producir",
+  { ...edRef, titulo: $("edTitulo2").value.trim(), subtitulos: $("edSubs").checked, estilo: $("edEstilo").value },
+  r => `Listo en PARA SUBIR: ${r.nombre}` + (r.palabras ? ` (${r.palabras} palabras)` : ""));
+
+/* ---------- ajustes ---------- */
+function filaLayout(nombre = "", face = "", game = "") {
+  const tr = el("tr");
+  for (const [val, ph, nom] of [[nombre, "canal", "Streamer"], [face, "300:300:60:430", "Recorte de cara"], [game, "1060:1080:430:0", "Recorte de gameplay"]]) {
+    const td = el("td"), i = el("input"); i.type = "text"; i.value = val; i.placeholder = ph; i.spellcheck = false; i.setAttribute("aria-label", nom);
+    td.append(i); tr.append(td);
+  }
+  const td = el("td");
+  const auto = boton("", "sparkle", "Auto");
+  auto.title = "Detectar la cámara automáticamente (el streamer tiene que estar en vivo)";
+  auto.onclick = () => autoCalibrar(tr, auto);
+  const ojo = el("button", "btn solo-ic"); ojo.append(ic("eye"));
+  ojo.title = "Ver el recorte sobre el directo"; ojo.setAttribute("aria-label", "Ver el recorte sobre el directo");
+  ojo.onclick = () => verRecorte(tr, false);
+  const x = el("button", "btn solo-ic"); x.append(ic("x")); x.title = "Quitar fila"; x.setAttribute("aria-label", "Quitar fila");
+  x.onclick = () => tr.remove();
+  td.append(auto, " ", ojo, " ", x); tr.append(td); return tr;
+}
+
+/* Calibración automática: detecta la cámara, rellena los números y enseña la previa.
+   No guarda: el usuario confirma con «Guardar recortes». */
+async function autoCalibrar(tr, btn) {
+  const inputs = tr.querySelectorAll("input"), canal = inputs[0].value.trim();
+  const msg = $("prevMsg");
+  if (!canal) { msg.style.color = "var(--bad)"; msg.textContent = "Escribe primero el nombre del canal en la fila."; return; }
+  const antes = [...btn.childNodes]; btn.disabled = true; setBtn(btn, null, "Analizando…");
+  msg.style.color = "var(--muted)";
+  msg.textContent = `Analizando el directo de ${canal}… puede tardar hasta un minuto (Twitch pone anuncios al conectar).`;
+  try {
+    const r = await api("/api/auto-calibrar", json("POST", { canal, plataforma: $("prevPlat").value }));
+    inputs[1].value = r.face; inputs[2].value = r.game;
+    await verRecorte(tr, false);
+    msg.style.color = r.aviso ? "var(--warn)" : "var(--ok)";
+    msg.textContent = (r.aviso || `Cámara detectada en ${r.con_cara} de ${r.frames} frames, ajustada a sus bordes.`)
+      + " Revisa la previa y pulsa «Guardar recortes».";
+  } catch (e) { msg.style.color = "var(--bad)"; msg.textContent = e.message; }
+  btn.disabled = false; btn.replaceChildren(...antes);
+}
+
+/* Vista previa: frame real + recortes dibujados + como queda el clip. */
+let filaPrevia = null, prevT, prevUrl;
+async function verRecorte(tr, fresco) {
+  const [canal, face, game] = [...tr.querySelectorAll("input")].map(i => i.value.trim());
+  const msg = $("prevMsg"), img = $("prevImg");   // null hasta la primera previa
+  if (!canal) { msg.style.color = "var(--bad)"; msg.textContent = "Pon el nombre del canal en la fila."; return; }
+  for (const f of $("lays").children) f.classList.toggle("activa", f === tr);
+  filaPrevia = tr; $("prevFresco").disabled = false;
+  msg.style.color = "var(--muted)";
+  msg.textContent = !img || fresco ? `Capturando un frame del directo de ${canal}…` : "Redibujando…";
+  const qs = new URLSearchParams({ canal, face, game, plataforma: $("prevPlat").value, fresco: fresco ? "true" : "false" });
+  try {
+    const r = await fetch("/api/preview-recorte?" + qs);
+    if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(typeof j.detail === "string" ? j.detail : "Error " + r.status); }
+    if (prevUrl) URL.revokeObjectURL(prevUrl);
+    prevUrl = URL.createObjectURL(await r.blob());
+    const vista = img || $("prevBox").appendChild(Object.assign(el("img"), { id: "prevImg",
+      alt: "Frame del directo con los recortes dibujados y, a la derecha, cómo queda el clip" }));
+    vista.src = prevUrl;
+    msg.textContent = `${canal}: izquierda = directo con los recortes · derecha = cómo queda el clip.`;
+  } catch (e) { msg.style.color = "var(--bad)"; msg.textContent = e.message; }
+}
+// Al cambiar los numeros de la fila que se esta viendo, redibuja (con el mismo frame).
+$("lays").addEventListener("input", e => {
+  if (!filaPrevia || !filaPrevia.contains(e.target)) return;
+  clearTimeout(prevT); prevT = setTimeout(() => verRecorte(filaPrevia, false), 600);
+});
+$("prevFresco").onclick = () => filaPrevia && verRecorte(filaPrevia, true);
+$("prevPlat").onchange = () => filaPrevia && verRecorte(filaPrevia, true);
+// En Cazar: si eliges split para alguien sin recorte, avisa de que se calibrará solo.
+let conRecorte = new Set();
+function pintarPistaSplit() {
+  const canal = $("canal").value.trim().toLowerCase(), p = $("pistaSplit");
+  p.hidden = !($("split").checked && canal && !conRecorte.has(canal));
+  p.textContent = `${canal} no tiene recorte todavía: al empezar se calibra solo con su cámara `
+    + "(en cuanto pasen los anuncios). Hasta entonces los clips salen en formato normal.";
+}
+$("split").addEventListener("change", pintarPistaSplit);
+$("canal").addEventListener("input", pintarPistaSplit);
+
+async function cargarLayouts() {
+  const lays = await api("/api/layouts");
+  conRecorte = new Set(Object.keys(lays)); pintarPistaSplit();
+  $("lays").replaceChildren(...Object.entries(lays).map(([n, l]) => filaLayout(n, l.face, l.game)));
+  $("streamers").replaceChildren(...Object.keys(lays).map(n => Object.assign(el("option"), { value: n })));
+}
+$("addLay").onclick = () => $("lays").append(filaLayout());
+$("saveLay").onclick = async () => {
+  const datos = {};
+  for (const tr of $("lays").children) {
+    const [n, f, g] = [...tr.querySelectorAll("input")].map(i => i.value.trim());
+    if (n) datos[n] = { face: f, game: g };
+  }
+  const m = $("layMsg");
+  try { const r = await api("/api/layouts", json("PUT", datos)); m.style.color = "var(--ok)"; m.textContent = "Guardado. " + r.nota; await cargarLayouts(); }
+  catch (e) { m.style.color = "var(--bad)"; m.textContent = e.message; }
+};
+async function cargarMarca() {
+  const m = await api("/api/marca");
+  $("handle").value = m.handle || ""; $("outro").value = m.outro || "";
+}
+$("saveMarca").onclick = async () => {
+  const msg = $("marcaMsg");
+  try { await api("/api/marca", json("PUT", { handle: $("handle").value.trim(), outro: $("outro").value.trim() }));
+        msg.style.color = "var(--ok)"; msg.textContent = "Guardada. Se aplica a los próximos clips que produzcas."; }
+  catch (e) { msg.style.color = "var(--bad)"; msg.textContent = e.message; }
+};
+
+/* ---------- limpieza ---------- */
+const LIMPIEZA = [   // [categoria, titulo, explicacion, texto del boton, definitivo?]
+  ["descartados", "Clips descartados", "Los que marcaste como Descartar. Van a la papelera.", "Mover a papelera", false],
+  ["originales_subidos", "Originales ya subidos", "El clip crudo de algo que ya está en SUBIDOS. Van a la papelera.", "Mover a papelera", false],
+  ["subidos", "Clips ya subidos", "Lo que hay en SUBIDOS, si no quieres guardar copia. Van a la papelera.", "Mover a papelera", false],
+  ["buffers", "Buffers de grabación", "Segmentos de directos que no estás cazando. Se vuelven a crear solos al cazar.", "Borrar buffers", false],
+  ["papelera", "Vaciar papelera", "Borra PARA SIEMPRE todo lo que hay en la papelera. No se puede deshacer.", "Vaciar papelera", true],
+];
+const mbTxt = mb => mb >= 1000 ? (mb / 1000).toFixed(1) + " GB" : Math.round(mb) + " MB";
+async function cargarLimpieza() {
+  const lista = $("limLista");
+  let r;
+  try { r = await api("/api/limpieza"); }
+  catch (e) { lista.replaceChildren(el("div", "err", e.message)); return; }
+  const total = Object.values(r).reduce((s, x) => s + x.mb, 0);
+  $("limTotal").textContent = total ? `Puedes liberar hasta ${mbTxt(total)}` : "Todo limpio";
+  lista.replaceChildren(...LIMPIEZA.map(([cat, titulo, expl, texto, definitivo]) => {
+    const { n, mb } = r[cat] || { n: 0, mb: 0 };
+    const fila = el("div", "lim-fila" + (definitivo ? " peligro" : ""));
+    const txt = el("div"); txt.append(el("h3", null, titulo), el("p", null, expl));
+    const num = el("div", "lim-num");
+    num.append(el("b", null, mbTxt(mb)), el("span", null, `${n} ${cat === "buffers" ? plural(n, "canal", "canales") : plural(n, "archivo", "archivos")}`));
+    // Lo irreversible no debe ser lo más llamativo; lo seguro y rentable (buffers), sí.
+    const b = boton(definitivo ? "peligro-suave" : cat === "buffers" && n ? "primario" : "",
+                    n ? (definitivo ? "trash" : cat === "buffers" ? "sparkle" : "trash") : null, n ? texto : "Nada que limpiar");
+    b.disabled = !n;
+    b.onclick = () => limpiar(cat, titulo, n, mb, definitivo, b);
+    fila.append(txt, num, b); return fila;
+  }));
+}
+async function limpiar(cat, titulo, n, mb, definitivo, btn) {
+  const unidad = cat === "buffers" ? "canales" : "archivos";
+  const pregunta = definitivo
+    ? `${titulo}: se borrarán PARA SIEMPRE ${n} archivos (${mbTxt(mb)}).\n\nEsto NO se puede deshacer. ¿Seguro?`
+    : cat === "buffers"
+      ? `¿Borrar los buffers de ${n} canales (${mbTxt(mb)})?\nSe vuelven a crear solos cuando cazas ese canal.`
+      : `¿Mover ${n} ${unidad} (${mbTxt(mb)}) a la papelera?\nSiguen recuperables hasta que vacíes la papelera.`;
+  if (!confirm(pregunta)) return;
+  btn.disabled = true; setBtn(btn, null, "Limpiando…");
+  try {
+    const r = await api("/api/limpieza", json("POST", { categoria: cat }));
+    aviso(`${titulo}: ${r.n} ${unidad}, ${mbTxt(r.mb)} ${definitivo || cat === "buffers" ? "liberados" : "movidos a la papelera"}.`);
+  } catch (e) { aviso(e.message, true); }
+  await cargarLimpieza(); refrescarClips(true).catch(() => {});
+}
+$("limRefrescar").onclick = cargarLimpieza;
+
+/* ---------- arranque ---------- */
+irA(TABS.includes(leer("tab", "cazar")) ? leer("tab", "cazar") : "cazar", false);
+setTimeout(() => document.body.classList.remove("entrando"), 1400);   // la entrada solo al abrir
+refrescarEstado(); refrescarClips().catch(() => {}); cargarLayouts().catch(() => {}); cargarMarca().catch(() => {});
+setInterval(refrescarEstado, 2000);
+setInterval(() => refrescarClips().catch(() => {}), 5000);
+</script>
+</body>
+</html>

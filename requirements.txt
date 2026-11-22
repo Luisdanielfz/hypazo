@@ -1,0 +1,12 @@
+fastapi>=0.165
+uvicorn>=0.54
+pydantic>=2.14
+yt-dlp>=2026.10.26
+opencv-python-headless>=5.1
+numpy>=2.5
+Pillow>=13.0
+faster-whisper>=1.2.1
+winocr>=0.0.15
+keyboard>=0.13.5
+httpx>=0.28
+pytest>=9.2

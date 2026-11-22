@@ -1,0 +1,32 @@
+name: Release
+
+# Al publicar una etiqueta v* se compila el instalador .exe y se adjunta a la Release.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  exe:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Tests
+        run: |
+          python -m pip install pytest httpx fastapi uvicorn pydantic
+          python -m pytest tests/piloto/test_install_ps1.py tests/piloto/test_credito.py tests/piloto/test_sesion.py tests/piloto/test_resumen.py tests/piloto/test_revision.py -q
+
+      - name: Inno Setup
+        run: |
+          if (-not (Test-Path "C:\Program Files (x86)\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress }
+
+      - name: Compilar el instalador
+        run: '& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "/DVersion=${{ github.ref_name }}" installer\hypazo.iss'
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/Hypazo-Setup-*.exe
+          generate_release_notes: true

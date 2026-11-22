@@ -1,0 +1,11 @@
+# Clips, segmentos y datos de uso: nunca al repositorio
+salida/
+buffer/
+*.mp4
+*.ts
+*.jpg
+codigos_detectados.txt
+marca.json
+__pycache__/
+.venv/
+dist/
