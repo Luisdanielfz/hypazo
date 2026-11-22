@@ -2,6 +2,11 @@ import json
 import os
 import subprocess
 
+
+def traza(r):
+    """Una línea con la salida de PowerShell: así se ve en el resumen de pytest (y en CI) por qué falló."""
+    return repr((r.returncode, r.stdout[-700:], r.stderr[-700:]))
+
 RAIZ = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 PS1 = os.path.join(RAIZ, "install.ps1")
 
@@ -23,8 +28,8 @@ def test_manifest_lista_las_etapas_en_orden():
 def test_sha_incorrecto_para_con_mensaje_claro(tmp_path):
     r = ps("-Stage", "prerequisites", env={"HYPAZO_HOME": str(tmp_path / "casa con espacio ñ"),
                                            "HYPAZO_TEST_BAD_SHA": "uv"})
-    assert r.returncode == 1
-    assert "no coincide con su huella SHA-256" in r.stdout
+    assert r.returncode == 1, traza(r)
+    assert "no coincide con su huella SHA-256" in r.stdout, traza(r)
     assert not list((tmp_path / "casa con espacio ñ" / "pm").glob("uv/*/uv.exe"))
 
 
@@ -43,8 +48,8 @@ def test_iex_dentro_de_un_script_dot_sourced_si_ejecuta(tmp_path):
                       f"iex ((Get-Content -Raw '{PS1}') + \"`n\")\n'SIGUE ABIERTA'\n", encoding="ascii")
     r = subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", f"& {{ . '{script}' }}"],
                        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120)
-    assert "Hypazo - instalacion" in r.stdout and "no coincide con su huella SHA-256" in r.stdout
-    assert "SIGUE ABIERTA" in r.stdout
+    assert "Hypazo - instalacion" in r.stdout and "no coincide con su huella SHA-256" in r.stdout, traza(r)
+    assert "SIGUE ABIERTA" in r.stdout, traza(r)
 
 
 def test_hypazo_cmd_sin_rutas_escritas(tmp_path):
