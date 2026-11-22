@@ -124,3 +124,60 @@ def test_chat_con_herramientas_las_manda_y_devuelve_las_llamadas():
                                 vistos))
     assert vistos[0][2]["tools"] == [{"type": "function"}]
     assert r["texto"] == "" and r["llamadas"] == tc
+
+
+def test_modelo_caducado_elige_otro_de_la_lista_y_reintenta():
+    pedidos = []
+
+    def manejar(req):
+        if req.method == "GET":
+            return httpx.Response(200, json={"data": [{"id": "whisper-large-v3"}, {"id": "openai/gpt-oss-120b"}]})
+        modelo = json.loads(req.content)["model"]
+        pedidos.append(modelo)
+        if modelo == "viejo":
+            return httpx.Response(404, json={"error": {"message": "The model viejo does not exist", "code": "model_not_found"}})
+        return httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]})
+    ia._reemplazos.clear()
+    c = cfg(groq={"clave": "a", "modelo": "viejo", "activo": True})
+    cl = httpx.Client(transport=httpx.MockTransport(manejar))
+    r = ia.chat(c, [{"role": "user", "content": "hola"}], cliente=cl)
+    assert r["modelo"] == "openai/gpt-oss-120b" and pedidos == ["viejo", "openai/gpt-oss-120b"]
+    ia.chat(c, [{"role": "user", "content": "otra"}], cliente=cl)
+    assert pedidos[-1] == "openai/gpt-oss-120b"          # ya no vuelve a probar el caducado
+
+
+@pytest.mark.parametrize("codigo", [429, 503])
+def test_proveedor_con_limite_descansa_y_se_usa_el_siguiente(codigo):
+    ia._descanso.clear()
+    vistos = []
+    c = cfg(groq={"clave": "a", "modelo": "", "activo": True}, gemini={"clave": "b", "modelo": "", "activo": True})
+    resp = {"api.groq.com": (codigo, "rate limit"), "generativelanguage.googleapis.com": ok("ok")}
+    ia.chat(c, [{"role": "user", "content": "1"}], cliente=cliente(resp, vistos))
+    ia.chat(c, [{"role": "user", "content": "2"}], cliente=cliente(resp, vistos))
+    assert [h for h, _, _ in vistos] == ["api.groq.com", "generativelanguage.googleapis.com",
+                                         "generativelanguage.googleapis.com"]
+    ia._descanso.clear()
+
+
+def test_si_todos_descansan_se_prueban_igual():
+    ia._descanso.clear()
+    ia._descanso["groq"] = 10 ** 12
+    c = cfg(groq={"clave": "a", "modelo": "", "activo": True})
+    assert ia.chat(c, [{"role": "user", "content": "1"}], cliente=cliente({"api.groq.com": ok("ok")}))["texto"] == "ok"
+    ia._descanso.clear()
+
+
+def test_gemini_retirado_para_usuarios_nuevos_tambien_se_cambia():
+    def manejar(req):
+        if req.method == "GET":
+            return httpx.Response(200, json={"data": [{"id": "models/gemini-2.5-flash-image"}, {"id": "models/gemini-live"},
+                                                      {"id": "models/gemini-flash-latest"}, {"id": "models/gemini-2.5-flash"}]})
+        if json.loads(req.content)["model"] == "gemini-2.5-flash":
+            return httpx.Response(404, json=[{"error": {"code": 404, "message":
+                                  "This model models/gemini-2.5-flash is no longer available to new users."}}])
+        return httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]})
+    ia._reemplazos.clear()
+    c = cfg(gemini={"clave": "a", "modelo": "gemini-2.5-flash", "activo": True})
+    r = ia.chat(c, [{"role": "user", "content": "hola"}], cliente=httpx.Client(transport=httpx.MockTransport(manejar)))
+    assert r["modelo"] == "gemini-flash-latest"
+    ia._reemplazos.clear()

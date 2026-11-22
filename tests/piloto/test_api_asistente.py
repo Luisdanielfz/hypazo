@@ -113,3 +113,20 @@ def test_accion_desconocida_o_canal_malo_400(cliente):
     assert cliente.post("/api/ia/accion", json={"herramienta": "borrar_todo", "args": {}}).status_code == 422
     r = cliente.post("/api/ia/accion", json={"herramienta": "empezar_caza", "args": {"canal": "../x"}})
     assert r.status_code == 400
+
+
+def test_el_contexto_guardado_vuelve_a_la_ia_y_se_conserva(cliente, monkeypatch):
+    import agente
+    vistos = {}
+
+    def responder(cfg, mensajes, lecturas, acciones, proveedor=None, modelo=None):
+        vistos["m"] = mensajes
+        return {"texto": "ok", "proveedor": "groq", "modelo": "m", "clips": [], "propuestas": [], "contexto": ""}
+    monkeypatch.setattr(agente, "responder", responder)
+    hist = [{"role": "user", "content": "busca"}, {"role": "assistant", "content": "2 clips", "ctx": "[Datos] a/b.mp4"},
+            {"role": "user", "content": "produce el segundo"}]
+    cliente.post("/api/ia/agente", json={"mensajes": hist})
+    assert vistos["m"][1] == {"role": "assistant", "content": "2 clips\n\n[Datos] a/b.mp4"}
+    conv = [{"id": "abcdef12", "titulo": "t", "hora": 1.0, "mensajes": hist}]
+    cliente.put("/api/ia/conversaciones", json={"conversaciones": conv})
+    assert cliente.get("/api/ia/conversaciones").json()["conversaciones"][0]["mensajes"][1]["ctx"] == "[Datos] a/b.mp4"

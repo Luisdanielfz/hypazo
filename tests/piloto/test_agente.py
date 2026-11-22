@@ -71,7 +71,7 @@ def test_si_ningun_proveedor_acepta_herramientas_contesta_sin_ellas():
             raise ia.ErrorIA("tools no soportado")
         return {"texto": "Hola", "proveedor": "x", "modelo": "m", "llamadas": []}
     r = agente.responder({}, [{"role": "user", "content": "hola"}], {}, {}, llamar=llamar)
-    assert r["texto"] == "Hola" and vistas[-1] is None
+    assert r["texto"].startswith("Hola") and vistas[-1] is None
 
 
 GRUPOS = [
@@ -126,3 +126,28 @@ def test_accion_con_argumentos_ilegibles_se_explica_bien():
 def test_titulo_largo_se_recorta_en_la_tarjeta():
     r = agente.resumen_accion("producir_clip", {"carpeta": "c", "nombre": "n.mp4", "titulo": "x" * 300})
     assert len(r) < 140
+
+
+def test_contexto_guarda_los_clips_encontrados_para_el_siguiente_mensaje():
+    lecturas = {"buscar_clips": lambda a: [{"carpeta": "2026-11-22_ibai", "nombre": "envivo_02.mp4", "canal": "ibai",
+                                            "fecha": "2026-11-22", "hora": "21:10:00", "score": 90}]}
+    llamar, _ = guion(("", [llamada("buscar_clips", {})]), ("Uno.", []))
+    r = agente.responder({}, [{"role": "user", "content": "x"}], lecturas, {}, llamar=llamar)
+    assert "2026-11-22_ibai/envivo_02.mp4" in r["contexto"] and "90" in r["contexto"]
+
+
+def test_recortar_deja_lo_mas_reciente_dentro_del_presupuesto():
+    msgs = [{"role": "user", "content": "a" * 5000}, {"role": "assistant", "content": "b" * 5000},
+            {"role": "user", "content": "ultima"}]
+    r = agente.recortar(msgs, 6000)
+    assert r[-1]["content"] == "ultima" and r[0]["role"] == "assistant" and sum(len(m["content"]) for m in r) <= 6000
+    assert agente.recortar([{"role": "user", "content": "z" * 9000}], 6000)[0]["content"].endswith("z")
+
+
+def test_sin_herramientas_avisa_de_que_no_miro_nada():
+    def llamar(cfg, mensajes, proveedor=None, modelo=None, herramientas=None):
+        if herramientas:
+            raise ia.ErrorIA("tools no soportado")
+        return {"texto": "Hola", "proveedor": "x", "modelo": "m", "llamadas": []}
+    r = agente.responder({}, [{"role": "user", "content": "busca"}], {}, {}, llamar=llamar)
+    assert r["texto"].startswith("Hola") and "herramientas" in r["texto"]

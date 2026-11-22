@@ -6,6 +6,7 @@ plan gratis de uno no deja al usuario sin IA.
 """
 import json
 import re
+import time
 
 import httpx
 
@@ -13,7 +14,7 @@ PROVEEDORES = {
     "groq": {"nombre": "Groq", "url": "https://api.groq.com/openai/v1", "modelo": "openai/gpt-oss-120b",
              "web": "https://console.groq.com/keys", "nota": "Gratis, muy rápido"},
     "gemini": {"nombre": "Google Gemini", "url": "https://generativelanguage.googleapis.com/v1beta/openai",
-               "modelo": "gemini-2.5-flash", "web": "https://aistudio.google.com/apikey",
+               "modelo": "gemini-flash-lite-latest", "web": "https://aistudio.google.com/apikey",
                "nota": "Gratis con límite diario"},
     "openrouter": {"nombre": "OpenRouter", "url": "https://openrouter.ai/api/v1",
                    "modelo": "meta-llama/llama-3.3-70b-instruct:free", "web": "https://openrouter.ai/keys",
@@ -136,13 +137,53 @@ def _cabeceras(d: dict) -> dict:
     return h
 
 
+_reemplazos = {}   # (proveedor, modelo caducado) -> modelo que sí existe, mientras dure la app
+_descanso = {}     # proveedor -> hora hasta la que no se usa (se pasó del límite gratuito)
+DESCANSO_S, DESCANSO_MAX_S = 60, 300
+SATURADO = (429, 503)          # límite gratuito o proveedor saturado: que descanse
+NO_CHAT = ("whisper", "guard", "safeguard", "tts", "embed", "orpheus", "audio", "image", "vision", "rerank",
+           "moderation", "transcribe", "live", "computer-use", "robotics", "lyria", "genie", "banana",
+           "deep-research", "aqa")
+PREFERIDOS = ("gpt-oss-120b", "llama-3.3-70b", "flash-latest", "-latest", "flash", "70b", "qwen", "mistral-small", "llama", "gpt")
+RE_CADUCADO = re.compile(r"model_not_found|does not exist|not found|no such model|unknown model|decommissioned|"
+                         r"not supported|invalid model|no longer available|deprecated|retired", re.I)
+
+
 def _candidatos(cfg, proveedor, modelo):
     lista = disponibles(cfg, proveedor)
     if not lista:
         raise ErrorIA("No hay ningún proveedor de IA listo. Añade una clave gratuita en Ajustes → Proveedores de IA.")
     if modelo and proveedor and lista[0]["id"] == proveedor:
         lista[0] = {**lista[0], "modelo": modelo}
-    return lista
+    lista = [{**d, "modelo": _reemplazos.get((d["id"], d["modelo"]), d["modelo"])} for d in lista]
+    ahora = time.time()
+    libres = [d for d in lista if _descanso.get(d["id"], 0) <= ahora]
+    return libres or lista              # si todos descansan, mejor intentarlo que no contestar
+
+
+def _descansar(d, r):
+    try:
+        espera = float(r.headers.get("retry-after") or DESCANSO_S)
+    except ValueError:
+        espera = DESCANSO_S
+    _descanso[d["id"]] = time.time() + min(DESCANSO_MAX_S, max(DESCANSO_S, espera))
+
+
+def elegir_modelo(lista: list) -> str | None:
+    """De los modelos de un proveedor, uno de chat (nada de voz, imagen o filtros), el mejor conocido primero."""
+    chat_ = [m for m in lista if not any(x in m.lower() for x in NO_CHAT)]
+    for pref in PREFERIDOS:
+        for m in chat_:
+            if pref in m.lower():
+                return m
+    return chat_[0] if chat_ else None
+
+
+def _sustituto(d, cliente):
+    try:
+        return elegir_modelo([m for m in _listar(d, cliente) if m != d["modelo"]])
+    except ErrorIA:
+        return None
 
 
 def _corto(texto, clave: str = "") -> str:
@@ -166,6 +207,14 @@ def chat(cfg: dict, mensajes: list, proveedor: str | None = None, modelo: str | 
             cuerpo["tools"] = herramientas
         try:
             r = cliente.post(d["url"] + "/chat/completions", headers=_cabeceras(d), json=cuerpo)
+            if r.status_code in (400, 404) and RE_CADUCADO.search(r.text) and "model" in r.text.lower():
+                nuevo = _sustituto(d, cliente)          # el modelo por defecto ya no existe: otro de su lista
+                if nuevo:
+                    _reemplazos[(d["id"], d["modelo"])] = nuevo
+                    d, cuerpo = {**d, "modelo": nuevo}, {**cuerpo, "model": nuevo}
+                    r = cliente.post(d["url"] + "/chat/completions", headers=_cabeceras(d), json=cuerpo)
+            if r.status_code in SATURADO:
+                _descansar(d, r)
             if r.status_code != 200:
                 errores.append(f"{d['id']}: {r.status_code} {_corto(r.text, d['clave'])}")
                 continue
@@ -207,6 +256,8 @@ def abrir_stream(cfg: dict, mensajes: list, proveedor: str | None = None, modelo
             r = cliente.send(req, stream=True)
             if r.status_code != 200:
                 r.read()
+                if r.status_code in SATURADO:
+                    _descansar(d, r)
                 errores.append(f"{d['id']}: {r.status_code} {_corto(r.text, d['clave'])}")
                 r.close()
                 continue
@@ -221,8 +272,10 @@ def modelos(cfg: dict, pid: str, cliente: httpx.Client | None = None) -> list:
     lista = [d for d in disponibles(cfg, pid) if d["id"] == pid]
     if not lista:
         raise ErrorIA("Pon primero la clave de ese proveedor.")
-    d = lista[0]
-    cliente = cliente or _compartido()
+    return _listar(lista[0], cliente or _compartido())
+
+
+def _listar(d: dict, cliente: httpx.Client) -> list:
     try:
         r = cliente.get(d["url"] + "/models", headers=_cabeceras(d))
         r.raise_for_status()

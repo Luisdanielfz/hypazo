@@ -132,6 +132,11 @@ def probar(p: Probar):
 class Mensaje(BaseModel):
     role: Literal["user", "assistant"]
     content: str = Field(max_length=12000)
+    ctx: str | None = Field(None, max_length=4000)    # lo que consultó la IA (clips…), para los siguientes mensajes
+
+
+def _para_ia(m: Mensaje) -> dict:
+    return {"role": m.role, "content": m.content + (f"\n\n{m.ctx}" if m.ctx else "")}
 
 
 class Chat(BaseModel):
@@ -142,7 +147,7 @@ class Chat(BaseModel):
 
 @router.post("/api/ia/chat")
 def chat(c: Chat):
-    mensajes = [{"role": "system", "content": SISTEMA}] + [m.model_dump() for m in c.mensajes[-40:]]
+    mensajes = [{"role": "system", "content": SISTEMA}] + [_para_ia(m) for m in c.mensajes[-40:]]
     try:
         prov, modelo, trozos = ia.abrir_stream(_cfg().get("ia", {}), mensajes, c.proveedor or None, c.modelo or None)
     except ia.ErrorIA as e:
@@ -191,7 +196,7 @@ def guardar_conversaciones(c: Conversaciones):
     tmp = ruta + ".tmp"
     with _lock:
         with open(tmp, "w", encoding="utf-8") as f:
-            json.dump([x.model_dump() for x in c.conversaciones], f, ensure_ascii=False)
+            json.dump([x.model_dump(exclude_none=True) for x in c.conversaciones], f, ensure_ascii=False)
         os.replace(tmp, ruta)
     return {"ok": True}
 
@@ -238,7 +243,7 @@ ACCIONES = {
 @router.post("/api/ia/agente")
 def agente_responder(c: Chat):
     try:
-        r = agente.responder(_cfg().get("ia", {}), [m.model_dump() for m in c.mensajes[-40:]], LECTURAS, ACCIONES,
+        r = agente.responder(_cfg().get("ia", {}), [_para_ia(m) for m in c.mensajes[-40:]], LECTURAS, ACCIONES,
                              c.proveedor or None, c.modelo or None)
     except ia.ErrorIA as e:
         raise HTTPException(502, str(e))
