@@ -24,6 +24,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from clips_vivos import ClipsVivos
 from credito import credito_final
 import sin_consola
 sin_consola.activar()   # ffmpeg/yt-dlp sin ventanas de terminal
@@ -43,15 +44,38 @@ RE_RECORTE = re.compile(r"^\d{1,4}:\d{1,4}:\d{1,4}:\d{1,4}$")
 
 os.makedirs(SALIDA, exist_ok=True)
 app = FastAPI(title="Clipeo")
+# Solo peticiones a este PC: una web que se haga pasar por 127.0.0.1 (DNS rebinding) recibe 400.
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost", "testserver"])
 app.mount("/salida", StaticFiles(directory=SALIDA), name="salida")
 # Fuentes y recursos de la interfaz, servidos desde el proyecto (sin depender de internet).
 os.makedirs(os.path.join(AQUI, "assets"), exist_ok=True)
 app.mount("/assets", StaticFiles(directory=os.path.join(AQUI, "assets")), name="assets")
+from api_asistente import router as _router_asistente   # preferencias, proveedores de IA y chat
+app.include_router(_router_asistente)
 
 # Estado del cazador: uno a la vez.
 _lock = threading.Lock()
 _estado = {"proc": None, "canal": "", "inicio": 0.0, "pausado": False}
 _log = collections.deque(maxlen=300)
+_vivos = ClipsVivos(SALIDA)
+
+
+def avisador(titulo, texto):
+    """Aviso de Windows. Lo sustituye la bandeja del sistema al abrir la app nativa (hypazo.py)."""
+
+
+def _avisar_clip(evento):
+    if not evento:
+        return
+    tipo, c = evento
+    try:
+        if tipo == "listo":
+            avisador("Clip listo", f"Clip {c['n']} de {_estado['canal']} guardado.")
+        else:
+            avisador("Clip descartado", f"Clip {c['n']}: {c['error']}"[:200])
+    except Exception:          # un aviso que falla no debe parar la lectura del cazador
+        pass
 
 
 class Arranque(BaseModel):
@@ -69,6 +93,7 @@ class Arranque(BaseModel):
 def _leer_salida(proc):
     for linea in proc.stdout:
         _log.append(linea.rstrip("\r\n"))
+        _avisar_clip(_vivos.leer(linea))
     _log.append(f"[proceso terminado, codigo {proc.wait()}]")
 
 
@@ -92,6 +117,7 @@ def start(a: Arranque):
         if a.split:
             cmd.append("--split")
         _log.clear()
+        _vivos.limpiar()
         _log.append("$ " + " ".join(cmd[2:]))
         env = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUNBUFFERED="1")
         # stdin=PIPE: por ahi le llega el "clip ya" (autoclip lo lee como un ENTER).
@@ -138,6 +164,7 @@ def vod(v: Vod):
         if v.split:
             cmd.append("--split")
         _log.clear()
+        _vivos.limpiar()
         _log.append("$ " + " ".join(cmd[2:]))
         env = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUNBUFFERED="1")
         proc = subprocess.Popen(cmd, cwd=AQUI, env=env, stdin=subprocess.DEVNULL,
@@ -279,7 +306,7 @@ def clip_ya():
 @app.get("/api/status")
 def status():
     return {"corriendo": _corriendo(), "canal": _estado["canal"], "pausado": _estado["pausado"],
-            "inicio": _estado["inicio"], "log": list(_log)[-120:]}
+            "inicio": _estado["inicio"], "log": list(_log)[-120:], "vivos": _vivos.lista()}
 
 
 PAPELERA = "_papelera"   # carpetas con '_' no salen en la galeria
@@ -663,6 +690,54 @@ def abrir_carpeta(c: Carpeta):
     """Abre la carpeta en el Explorador de Windows (para arrastrar el clip a TikTok)."""
     os.startfile(ruta_carpeta(c.carpeta))   # app local: abre en el PC del usuario
     return {"ok": True}
+
+
+@app.post("/api/abrir-salida")
+def abrir_salida():
+    """La carpeta donde se guardan todos los clips (asistente de primer uso)."""
+    os.startfile(SALIDA)
+    return {"ok": True}
+
+
+class Textos(ClipRef):
+    transcribir: bool = True
+
+
+def _transcripcion(mp4, meta):
+    """Lo que se dice en el clip (Whisper local, se guarda en su .json). Vacío si el PC está ocupado."""
+    if meta.get("transcripcion") is not None:
+        return meta["transcripcion"]
+    from produccion import transcribir
+    if not _lock_prod.acquire(timeout=2):
+        return ""
+    try:
+        texto = " ".join(w for _i, _f, w in transcribir(mp4))[:3000]
+    except (subprocess.CalledProcessError, OSError, RuntimeError):
+        return ""
+    finally:
+        _lock_prod.release()
+    _guardar_meta(mp4, {**_meta(mp4), "transcripcion": texto})
+    return texto
+
+
+@app.post("/api/clip/textos")
+def clip_textos(t: Textos):
+    """Títulos, hashtags y textos para TikTok / Shorts / Reels (con IA si hay proveedor)."""
+    import hypazo
+    import ia
+    import textos_clip
+    mp4 = ruta_clip(t.carpeta, t.nombre)
+    meta = _meta(mp4)
+    if not meta.get("canal"):                  # clips viejos: el canal sale de la carpeta
+        m = re.match(r"^\d{4}-\d{2}-\d{2}_(kick_)?(.+)$", meta.get("origen") or t.carpeta)
+        if m:
+            meta = {**meta, "canal": m[2], "plataforma": "kick" if m[1] else "twitch"}
+    cfg_ia = hypazo.config().get("ia", {})
+    hay_ia = bool(ia.disponibles(cfg_ia))
+    texto = _transcripcion(mp4, meta) if (hay_ia and t.transcribir) else ""
+    res = textos_clip.generar(meta, cfg_ia, texto) if hay_ia else textos_clip.basico(meta)
+    _guardar_meta(mp4, {**_meta(mp4), "textos": res})
+    return res
 
 
 _frames = {}            # (plataforma, canal) -> (hora, png): reusar el frame al ajustar numeros

@@ -18,7 +18,7 @@ import webbrowser
 
 AQUI = os.path.dirname(os.path.abspath(__file__))
 PUERTO = 8765
-MODULOS = ("fastapi", "uvicorn", "cv2", "yt_dlp", "faster_whisper", "numpy", "PIL", "webview")
+MODULOS = ("fastapi", "uvicorn", "cv2", "yt_dlp", "faster_whisper", "numpy", "PIL", "webview", "pystray")
 
 
 def casa() -> str:
@@ -86,12 +86,38 @@ def salidas_sin_consola() -> None:
 def ventana(url: str, navegador=webbrowser.open) -> None:
     """Ventana nativa de Windows (WebView2, el motor de Edge) con la interfaz de Hypazo.
     Se bloquea hasta que el usuario la cierra. Sin pywebview o sin WebView2, abre el navegador."""
+    bandeja = None
     try:
         import webview
-        webview.create_window("Hypazo", url, width=1280, height=860, min_size=(900, 600))
+        w = webview.create_window("Hypazo", url, width=1280, height=860, min_size=(900, 600))
+        bandeja = _bandeja(w)
         webview.start()
     except Exception:              # pywebview ausente o WebView2 no disponible: que la app siga usable
         navegador(url)
+    finally:
+        if bandeja:
+            bandeja.quitar()
+
+
+def _bandeja(w):
+    """Icono junto al reloj, solo en el proceso que sirve la app (si no, habría uno por ventana)."""
+    app = sys.modules.get("app")
+    if app is None:
+        return None
+    try:
+        from bandeja import RUTA_ICO, Bandeja, al_cerrar
+        saliendo = []
+
+        def salir():
+            saliendo.append(1)
+            w.destroy()
+        b = Bandeja({"abrir": lambda: (w.show(), w.restore()), "clip": app._seguro(app.clip_ya),
+                     "pausa": app._seguro(app._alternar_pausa), "salir": salir}, RUTA_ICO)
+    except Exception:              # sin pystray o sin bandeja: la app sigue, sin icono ni avisos
+        return None
+    app.avisador = b.avisar
+    w.events.closing += lambda: True if saliendo else al_cerrar(app._corriendo, w.hide, b.avisar)
+    return b
 
 
 def _servir(puerto: int) -> None:

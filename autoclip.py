@@ -271,6 +271,7 @@ def _trabajo_clip(a, indice, trozo, split, assf, layout, carpeta, meta, sesiones
     """El render de un clip, para el hilo de render: corta, guarda su .json y borra el trozo."""
     def trabajo():
         try:
+            print(f"   Renderizando clip {indice}...")     # la app lo enseña en la tarjeta del clip
             quitar_anuncios(trozo)                      # fuera la pantalla de anuncios de Twitch
             if split:
                 recortar_split(a.credito, a.segundos, indice, assf, layout, carpeta, unido=trozo)
