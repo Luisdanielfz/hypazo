@@ -10,7 +10,7 @@ import re
 import httpx
 
 PROVEEDORES = {
-    "groq": {"nombre": "Groq", "url": "https://api.groq.com/openai/v1", "modelo": "llama-3.3-70b-versatile",
+    "groq": {"nombre": "Groq", "url": "https://api.groq.com/openai/v1", "modelo": "openai/gpt-oss-120b",
              "web": "https://console.groq.com/keys", "nota": "Gratis, muy rápido"},
     "gemini": {"nombre": "Google Gemini", "url": "https://generativelanguage.googleapis.com/v1beta/openai",
                "modelo": "gemini-2.5-flash", "web": "https://aistudio.google.com/apikey",
@@ -153,22 +153,26 @@ def _corto(texto, clave: str = "") -> str:
 
 
 def chat(cfg: dict, mensajes: list, proveedor: str | None = None, modelo: str | None = None,
-         cliente: httpx.Client | None = None, json_modo: bool = False) -> dict:
-    """Respuesta completa. Prueba los proveedores en orden hasta que uno conteste."""
+         cliente: httpx.Client | None = None, json_modo: bool = False, herramientas: list | None = None) -> dict:
+    """Respuesta completa. Prueba los proveedores en orden hasta que uno conteste.
+    Con herramientas, 'llamadas' trae las que pidió la IA (formato tool_calls de OpenAI)."""
     cliente = cliente or _compartido()
     errores = []
     for d in _candidatos(cfg, proveedor, modelo):
         cuerpo = {"model": d["modelo"], "messages": mensajes}
         if json_modo:
             cuerpo["response_format"] = {"type": "json_object"}
+        if herramientas:
+            cuerpo["tools"] = herramientas
         try:
             r = cliente.post(d["url"] + "/chat/completions", headers=_cabeceras(d), json=cuerpo)
             if r.status_code != 200:
                 errores.append(f"{d['id']}: {r.status_code} {_corto(r.text, d['clave'])}")
                 continue
-            texto = r.json()["choices"][0]["message"]["content"] or ""
-            return {"texto": texto, "proveedor": d["id"], "modelo": d["modelo"]}
-        except (httpx.HTTPError, httpx.InvalidURL, ValueError, KeyError, IndexError, TypeError) as e:
+            msg = r.json()["choices"][0]["message"]
+            return {"texto": msg.get("content") or "", "proveedor": d["id"], "modelo": d["modelo"],
+                    "llamadas": msg.get("tool_calls") or []}
+        except (httpx.HTTPError, httpx.InvalidURL, ValueError, KeyError, IndexError, TypeError, AttributeError) as e:
             errores.append(f"{d['id']}: {_corto(e, d['clave'])}")
     raise ErrorIA("Ningún proveedor respondió. " + " | ".join(errores))
 

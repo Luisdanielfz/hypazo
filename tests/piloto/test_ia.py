@@ -64,7 +64,7 @@ def test_chat_usa_el_primero_y_manda_la_clave():
     vistos = []
     c = cfg(groq={"clave": "gsk", "modelo": "", "activo": True})
     r = ia.chat(c, [{"role": "user", "content": "hola"}], cliente=cliente({"api.groq.com": ok("¡Hola!")}, vistos))
-    assert r == {"texto": "¡Hola!", "proveedor": "groq", "modelo": ia.PROVEEDORES["groq"]["modelo"]}
+    assert r == {"texto": "¡Hola!", "proveedor": "groq", "modelo": ia.PROVEEDORES["groq"]["modelo"], "llamadas": []}
     assert vistos[0][1] == "Bearer gsk" and vistos[0][2]["messages"][-1]["content"] == "hola"
 
 
@@ -113,3 +113,14 @@ def test_la_clave_no_sale_en_los_errores():
 def test_url_personalizada_malformada_se_rechaza_al_guardar():
     with pytest.raises(ValueError):
         ia.actualizar(cfg(), "personalizado", {"url": "http://[x/v1"})
+
+
+def test_chat_con_herramientas_las_manda_y_devuelve_las_llamadas():
+    vistos = []
+    tc = [{"id": "c1", "type": "function", "function": {"name": "estado_cazador", "arguments": "{}"}}]
+    c = cfg(groq={"clave": "a", "modelo": "", "activo": True})
+    r = ia.chat(c, [{"role": "user", "content": "hola"}], herramientas=[{"type": "function"}],
+                cliente=cliente({"api.groq.com": (200, {"choices": [{"message": {"content": None, "tool_calls": tc}}]})},
+                                vistos))
+    assert vistos[0][2]["tools"] == [{"type": "function"}]
+    assert r["texto"] == "" and r["llamadas"] == tc

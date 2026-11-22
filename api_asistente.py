@@ -7,12 +7,14 @@ import json
 import os
 import re
 import threading
+import time
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
+import agente
 import hypazo
 import ia
 
@@ -192,3 +194,66 @@ def guardar_conversaciones(c: Conversaciones):
             json.dump([x.model_dump() for x in c.conversaciones], f, ensure_ascii=False)
         os.replace(tmp, ruta)
     return {"ok": True}
+
+
+def _app():
+    import app                       # ya cargado: es quien incluye este router
+    return app
+
+
+def _estado_cazador(_a):
+    s = _app().status()
+    minutos = round((time.time() - s["inicio"]) / 60) if s["corriendo"] and s["inicio"] else 0
+    return {"corriendo": s["corriendo"], "canal": s["canal"] if s["corriendo"] else "", "pausado": s["pausado"],
+            "minutos": minutos, "clips_en_marcha": s["vivos"]}
+
+
+LECTURAS = {
+    "buscar_clips": lambda a: agente.buscar(_app().clips(), **{k: a[k] for k in
+                                            ("texto", "canal", "dias", "orden", "limite") if k in a}),
+    "estado_cazador": _estado_cazador,
+    "resumen": lambda a: agente.resumen(_app().clips(), a.get("dias") or 7),
+}
+
+
+def _producir(a):
+    m = _app()
+    return m.clip_producir(m.Produccion(carpeta=str(a.get("carpeta", "")), nombre=str(a.get("nombre", "")),
+                                        titulo=str(a.get("titulo") or "")[:80],
+                                        estilo=a.get("estilo") if a.get("estilo") in ("amarillo", "caja", "minimal")
+                                        else "amarillo"))
+
+
+# Solo tras pulsar Confirmar en el chat. Cada una pasa por el endpoint de siempre (y su validación).
+ACCIONES = {
+    "empezar_caza": lambda a: _app().start(_app().Arranque(
+        canal=str(a.get("canal", "")), plataforma="kick" if a.get("plataforma") == "kick" else "twitch")),
+    "parar_caza": lambda a: _app().stop(),
+    "producir_clip": _producir,
+    "generar_textos": lambda a: _app().clip_textos(_app().Textos(carpeta=str(a.get("carpeta", "")),
+                                                                  nombre=str(a.get("nombre", "")))),
+}
+
+
+@router.post("/api/ia/agente")
+def agente_responder(c: Chat):
+    try:
+        r = agente.responder(_cfg().get("ia", {}), [m.model_dump() for m in c.mensajes[-40:]], LECTURAS, ACCIONES,
+                             c.proveedor or None, c.modelo or None)
+    except ia.ErrorIA as e:
+        raise HTTPException(502, str(e))
+    return {**r, "proveedor": ia.PROVEEDORES.get(r["proveedor"], {}).get("nombre", r["proveedor"])}
+
+
+class Accion(BaseModel):
+    herramienta: Literal["empezar_caza", "parar_caza", "producir_clip", "generar_textos"]
+    args: dict = Field(default_factory=dict)
+
+
+@router.post("/api/ia/accion")
+def accion(a: Accion):
+    try:
+        res = ACCIONES[a.herramienta](a.args)
+    except ValidationError as e:
+        raise HTTPException(400, "Datos no válidos: " + str(e.errors()[0].get("msg", ""))[:120])
+    return {"ok": True, "resumen": agente.resumen_accion(a.herramienta, a.args), "resultado": res}

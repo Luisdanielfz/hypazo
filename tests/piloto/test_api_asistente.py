@@ -80,3 +80,36 @@ def test_textos_de_clip_sin_ia_son_basicos_y_se_guardan(cliente, tmp_path, monke
 def test_otro_host_se_rechaza_dns_rebinding():
     r = TestClient(app_mod.app, base_url="http://evil.example").get("/api/preferencias")
     assert r.status_code == 400
+
+
+def test_agente_devuelve_texto_y_propuestas(cliente, monkeypatch):
+    import agente
+    vistos = {}
+
+    def responder(cfg, mensajes, lecturas, acciones, proveedor=None, modelo=None):
+        vistos.update(lecturas=set(lecturas), acciones=set(acciones))
+        return {"texto": "Lo paro", "proveedor": "groq", "modelo": "m", "clips": [],
+                "propuestas": [{"herramienta": "parar_caza", "args": {}, "resumen": "Parar el cazador"}]}
+    monkeypatch.setattr(agente, "responder", responder)
+    r = cliente.post("/api/ia/agente", json={"mensajes": [{"role": "user", "content": "para"}]}).json()
+    assert r["texto"] == "Lo paro" and r["proveedor"] == "Groq" and r["propuestas"][0]["herramienta"] == "parar_caza"
+    assert vistos["lecturas"] == {"buscar_clips", "estado_cazador", "resumen"}
+    assert vistos["acciones"] == {"empezar_caza", "parar_caza", "producir_clip", "generar_textos"}
+
+
+def test_agente_sin_proveedores_502(cliente):
+    r = cliente.post("/api/ia/agente", json={"mensajes": [{"role": "user", "content": "hola"}]})
+    assert r.status_code == 502 and "Ajustes" in r.json()["detail"]
+
+
+def test_accion_confirmada_se_hace(cliente, monkeypatch):
+    hecho = []
+    monkeypatch.setattr(app_mod, "stop", lambda: hecho.append(1) or {"ok": True})
+    r = cliente.post("/api/ia/accion", json={"herramienta": "parar_caza", "args": {}})
+    assert r.status_code == 200 and hecho == [1] and r.json()["ok"] is True
+
+
+def test_accion_desconocida_o_canal_malo_400(cliente):
+    assert cliente.post("/api/ia/accion", json={"herramienta": "borrar_todo", "args": {}}).status_code == 422
+    r = cliente.post("/api/ia/accion", json={"herramienta": "empezar_caza", "args": {"canal": "../x"}})
+    assert r.status_code == 400

@@ -436,6 +436,16 @@
   .msg .meta button { height: 26px; padding: 0 8px; border: 1px solid var(--edge); border-radius: 8px; background: none; color: var(--muted); cursor: pointer; font-size: 11.5px; }
   .msg .meta button:hover { color: var(--ink); border-color: var(--edge-hi); }
   .msg.error .txt { color: var(--bad); }
+  .pensando { color: var(--muted); }
+  .chat-clips { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; margin-top: 10px; }
+  .chat-clips button { display: grid; gap: 2px; text-align: left; padding: 9px 12px; border: 1px solid var(--edge); border-radius: 12px;
+                       background: rgba(255,255,255,.04); color: var(--ink); cursor: pointer; font: inherit; min-width: 0; }
+  .chat-clips button:hover { border-color: var(--edge-hi); background: rgba(255,255,255,.08); }
+  .chat-clips b { font-weight: 600; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .chat-clips small { color: var(--dim); font-size: 11.5px; }
+  .propuesta { margin-top: 12px; padding: 14px 16px; border: 1px solid var(--cyan); border-radius: 14px; background: rgba(0,229,255,.06); }
+  .propuesta p { margin: 0 0 8px; font-weight: 600; } .propuesta ul { margin: 0 0 12px; padding-left: 20px; }
+  .propuesta .fila { display: flex; gap: 8px; flex-wrap: wrap; } .propuesta .hecho { margin: 0; font-weight: 400; white-space: pre-line; }
   .cursor::after { content: "▍"; color: var(--cyan); animation: latido 1s infinite; margin-left: 2px; }
   .chat-vacio { margin: auto; max-width: 560px; text-align: center; padding: 20px; }
   .chat-vacio .logo-ia { width: 54px; height: 54px; margin: 0 auto 16px; border-radius: 16px; display: grid; place-items: center;
@@ -2125,10 +2135,10 @@ const provModelos = {};
 
 /* ---------- Asistente: chat con IA ---------- */
 let convs = [], convActual = null, enviando = null, chatCargado = false;
-const SUGERENCIAS = [["Dame 5 títulos gancho", "para un clip donde el streamer se enfada con el chat"],
-                     ["¿Qué hashtags uso?", "para clips de Just Chatting en TikTok"],
-                     ["¿A qué hora subo mis clips?", "para llegar a España y Latinoamérica"],
-                     ["¿Cómo saco más clips buenos?", "con F9, F8 y la sensibilidad"]];
+const SUGERENCIAS = [["Busca mis mejores clips", "de esta semana y dime cuáles producir"],
+                     ["¿Cómo va el cazador?", "y cuántos clips llevo hoy"],
+                     ["Dame 5 títulos gancho", "para un clip donde el streamer se enfada con el chat"],
+                     ["¿A qué hora subo mis clips?", "para llegar a España y Latinoamérica"]];
 const nuevoId = () => ((crypto.randomUUID && crypto.randomUUID()) || (Date.now().toString(16) + Math.random().toString(16).slice(2))).replace(/[^0-9a-f]/g, "").slice(0, 16);
 const listos = () => prefs.ia.orden.filter(id => (prefs.ia.proveedores[id] || {}).listo);
 
@@ -2239,32 +2249,63 @@ async function enviar(texto) {
   c.mensajes.push(resp);
   $("chTexto").value = ""; crecer();
   pintarConvs(); pintarChat();
-  const nodo = $("chMsgs").lastElementChild, txt = nodo.querySelector(".txt");
-  txt.classList.add("cursor");
+  let nodo = $("chMsgs").lastElementChild;
+  const txt = nodo.querySelector(".txt");
+  txt.textContent = "Pensando"; txt.classList.add("cursor", "pensando");
   enviando = new AbortController(); modoEnviar(true);
   try {
-    const r = await fetch("/api/ia/chat", { ...json("POST", { mensajes: c.mensajes.slice(0, -1).slice(-40).map(m => ({ role: m.role, content: m.content.slice(0, 12000) })), proveedor: $("chProv").value || null }), signal: enviando.signal });
-    if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(typeof j.detail === "string" ? j.detail : "Error " + r.status); }
-    resp.prov = [r.headers.get("X-Proveedor"), r.headers.get("X-Modelo")].filter(Boolean).join(" · ");
-    nodo.querySelector(".meta-prov").textContent = resp.prov;
-    const lector = r.body.getReader(), dec = new TextDecoder();
-    for (;;) {
-      const { done, value } = await lector.read();
-      if (done) break;
-      resp.content += dec.decode(value, { stream: true });
-      txt.innerHTML = md(resp.content); bajar();
-    }
-    if (!resp.content) { resp.content = "_(El proveedor no devolvió texto.)_"; txt.innerHTML = md(resp.content); }
+    // Con herramientas: la IA puede buscar clips y mirar el cazador; lo que cambia algo vuelve como propuesta.
+    const r = await api("/api/ia/agente", { ...json("POST", { mensajes: c.mensajes.slice(0, -1).slice(-40).map(m => ({ role: m.role, content: m.content.slice(0, 12000) })), proveedor: $("chProv").value || null }), signal: enviando.signal });
+    resp.content = r.texto || (r.propuestas.length ? "Esto es lo que haría:" : "_(El proveedor no devolvió texto.)_");
+    resp.prov = [r.proveedor, r.modelo].filter(Boolean).join(" · ");
+    const n = burbuja(resp);
+    if (r.clips.length && !r.propuestas.length) n.querySelector(".txt").after(listaClipsChat(r.clips));   // con propuesta, la lista estorba
+    if (r.propuestas.length) n.querySelector(".txt").after(tarjetaPropuestas(r.propuestas, c));
+    nodo.replaceWith(n); nodo = n;
   } catch (e) {
-    if (e.name === "AbortError") { resp.content += "\n\n_(detenido)_"; txt.innerHTML = md(resp.content); }
+    if (e.name === "AbortError") { resp.content = "_(detenido)_"; nodo.replaceWith(burbuja(resp)); }
     else {
       c.mensajes.pop();                                // la respuesta vacía no se guarda
       nodo.replaceWith(burbujaError(e.message, c));
     }
   } finally {
-    txt.classList.remove("cursor"); enviando = null; modoEnviar(false); bajar();
+    enviando = null; modoEnviar(false); bajar();
     guardarConvs(); $("chTexto").focus();
   }
+}
+function listaClipsChat(clips) {
+  const l = el("div", "chat-clips");
+  for (const k of clips.slice(0, 8)) {
+    const b = el("button", null); b.type = "button";
+    b.append(el("b", null, k.titulo || `${k.canal} · ${k.nombre}`),
+             el("small", null, [k.fecha, k.hora, k.score != null ? "score " + k.score : ""].filter(Boolean).join(" · ")));
+    b.onclick = () => abrirClipVivo(k);
+    l.append(b);
+  }
+  return l;
+}
+function tarjetaPropuestas(props, c) {
+  const t = el("div", "propuesta");
+  t.append(el("p", null, props.length > 1 ? "¿Lo hago?" : "¿Lo hago? Necesito tu permiso:"));
+  const ul = el("ul"); ul.append(...props.map(p => el("li", null, p.resumen))); t.append(ul);
+  const si = boton("primario", "check", props.length > 1 ? `Sí, haz las ${props.length}` : "Sí, hazlo"), no = boton("", "x", "No");
+  const fila = el("div", "fila"); fila.append(si, no); t.append(fila);
+  const cerrar = (msg) => {
+    t.replaceChildren(el("p", "hecho", msg));
+    c.mensajes.push({ role: "assistant", content: msg }); guardarConvs();
+  };
+  no.onclick = () => cerrar("Vale, no hago nada.");
+  si.onclick = async () => {
+    si.disabled = no.disabled = true; setBtn(si, "refresh", "Haciéndolo…");
+    const hechas = [];
+    for (const p of props) {
+      try { await api("/api/ia/accion", json("POST", { herramienta: p.herramienta, args: p.args })); hechas.push("✅ " + p.resumen); }
+      catch (e) { hechas.push("❌ " + p.resumen + ": " + e.message); }
+    }
+    cerrar(hechas.join("\n\n"));
+    refrescarEstado(); refrescarClips().catch(() => {});
+  };
+  return t;
 }
 function burbujaError(mensaje, c) {
   const n = burbuja({ role: "assistant", content: mensaje }, "error"), meta = n.querySelector(".meta");
