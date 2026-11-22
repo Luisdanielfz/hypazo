@@ -11,6 +11,8 @@ permissions:
 jobs:
   exe:
     runs-on: windows-latest
+    env:
+      AZURE_SIGNING_ACCOUNT: ${{ secrets.AZURE_SIGNING_ACCOUNT }}
     steps:
       - uses: actions/checkout@v4
 
@@ -34,6 +36,24 @@ jobs:
 
       - name: Compilar el instalador
         run: '& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "/DVersion=${{ github.ref_name }}" installer\hypazo.iss'
+
+      # Firma con Azure Artifact Signing. Solo se ejecuta cuando están configurados los secretos del repositorio
+      # (guía: Obsidian "Hypazo - Firma del instalador"); sin ellos el .exe sale sin firmar, como hasta ahora.
+      - name: Firmar el instalador
+        if: env.AZURE_SIGNING_ACCOUNT != ''
+        uses: azure/artifact-signing-action@v2
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: ${{ secrets.AZURE_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ secrets.AZURE_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ secrets.AZURE_CERT_PROFILE }}
+          files-folder: dist
+          files-folder-filter: exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
 
       - uses: softprops/action-gh-release@v2
         with:

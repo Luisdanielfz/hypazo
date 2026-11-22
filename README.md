@@ -6,7 +6,7 @@ Saca los mejores momentos de un directo de **Twitch** o **Kick** mientras ocurre
 
 ## Instalar
 
-### Opción 1: una línea en la terminal
+### Opción 1 (recomendada): una línea en la terminal
 
 Abre **PowerShell** y pega:
 
@@ -28,7 +28,7 @@ No toca el Python ni el Git que ya tengas.
 
 Descarga `Hypazo-Setup-<versión>.exe` desde [Releases](https://github.com/Luisdanielfz/hypazo/releases/latest) y ejecútalo: siguiente, siguiente, terminar.
 - Por dentro hace lo mismo que la opción 1, así que necesita internet.
-- Windows puede avisar de "editor desconocido" porque el instalador aún no está firmado.
+- Mientras el instalador no esté firmado, Windows SmartScreen muestra "Windows protegió su PC". Pulsa **Más información → Ejecutar de todas formas**. La opción 1 no muestra este aviso.
 
 ## Usar
 
