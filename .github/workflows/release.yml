@@ -23,8 +23,8 @@ jobs:
           $codigo = $LASTEXITCODE
           Get-Content pytest.txt
           if ($codigo -ne 0) {
-            # Las anotaciones se pueden leer sin iniciar sesión: así se ve por qué falló.
-            Get-Content pytest.txt | Select-Object -Last 25 | ForEach-Object { Write-Host "::error::$_" }
+            # Las anotaciones se leen sin iniciar sesión (máximo 10 por paso): solo las líneas del error.
+            (Select-String -Path pytest.txt -Pattern "^E |^FAILED").Line | Select-Object -First 9 | ForEach-Object { Write-Host "::error::$($_.Substring(0, [Math]::Min(900, $_.Length)))" }
             exit $codigo
           }
 
