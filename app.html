@@ -618,6 +618,15 @@
         <div class="ok" id="marcaMsg" role="status"></div>
       </div>
       <div class="glass panel" style="--i:2">
+        <h2 class="titulo">Actualizaciones</h2>
+        <p class="ayuda" id="actEstado">Comprobando si hay una versión nueva…</p>
+        <div class="botones">
+          <button class="btn" id="actBuscar"><svg class="ic"><use href="#i-refresh"/></svg><span>Buscar actualizaciones</span></button>
+          <button class="btn primario" id="actInstalar" hidden><svg class="ic"><use href="#i-upload"/></svg><span>Actualizar ahora</span></button>
+        </div>
+        <div class="ok" id="actMsg" role="status"></div>
+      </div>
+      <div class="glass panel" style="--i:3">
         <h2 class="titulo">Recortes por streamer (formato split)</h2>
         <p class="ayuda">ancho:alto:x:y sobre el frame 1920×1080. Se aplican al próximo arranque del cazador.</p>
         <table>
@@ -630,7 +639,7 @@
         </div>
         <div class="ok" id="layMsg" role="status"></div>
       </div>
-      <div class="glass panel previa" style="--i:3">
+      <div class="glass panel previa" style="--i:4">
         <div class="pulso-cab">
           <h2 class="titulo">Vista previa del recorte</h2>
           <div class="botones" style="margin:0">
@@ -1629,10 +1638,34 @@ async function limpiar(cat, titulo, n, mb, definitivo, btn) {
 }
 $("limRefrescar").onclick = cargarLimpieza;
 
+/* ---------- actualizaciones (Ajustes): busca en GitHub al abrir y avisa si hay versión nueva ---------- */
+async function buscarActualizacion(avisarSiNueva) {
+  const est = $("actEstado"); $("actMsg").textContent = "";
+  try {
+    const v = await api("/api/version");
+    if (!v.ultima) est.textContent = `Versión instalada: ${v.actual}. No se pudo consultar GitHub (¿sin conexión?).`;
+    else if (v.hay_nueva) {
+      est.textContent = `Versión instalada: ${v.actual}. Hay una versión nueva: ${v.ultima}.`;
+      if (avisarSiNueva) aviso(`Hay una versión nueva de Hypazo (${v.ultima}). Actualízala en Ajustes → Actualizaciones.`);
+    } else est.textContent = `Versión instalada: ${v.actual}. Ya tienes la última versión.`;
+    $("actInstalar").hidden = !(v.hay_nueva && v.instalado);
+  } catch (e) { est.textContent = "No se pudo comprobar: " + e.message; }
+}
+$("actBuscar").onclick = () => buscarActualizacion(false);
+$("actInstalar").onclick = async () => {
+  const b = $("actInstalar"), m = $("actMsg");
+  b.disabled = $("actBuscar").disabled = true;
+  m.style.color = ""; m.textContent = "Actualizando… puede tardar unos minutos.";
+  try { const r = await api("/api/actualizar", { method: "POST" }); m.textContent = r.mensaje; b.hidden = true; aviso(r.mensaje); }
+  catch (e) { m.style.color = "var(--bad)"; m.textContent = e.message; }
+  b.disabled = $("actBuscar").disabled = false;
+};
+
 /* ---------- arranque ---------- */
 irA(TABS.includes(leer("tab", "cazar")) ? leer("tab", "cazar") : "cazar", false);
 setTimeout(() => document.body.classList.remove("entrando"), 1400);   // la entrada solo al abrir
 refrescarEstado(); refrescarClips().catch(() => {}); cargarLayouts().catch(() => {}); cargarMarca().catch(() => {});
+buscarActualizacion(true);
 setInterval(refrescarEstado, 2000);
 setInterval(() => refrescarClips().catch(() => {}), 5000);
 </script>

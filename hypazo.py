@@ -167,6 +167,41 @@ def doctor() -> list[tuple[str, bool, str]]:
     return filas
 
 
+RELEASES = "https://api.github.com/repos/Luisdanielfz/hypazo/releases/latest"
+
+
+def version_actual() -> str:
+    with open(os.path.join(AQUI, "VERSION"), encoding="utf-8") as f:
+        return f.read().strip()
+
+
+def ultima_version(abrir=None) -> str | None:
+    """Etiqueta de la última versión publicada en GitHub (p. ej. 'v0.4.0'), o None sin conexión."""
+    import urllib.request
+    abrir = abrir or (lambda url, timeout: urllib.request.urlopen(
+        urllib.request.Request(url, headers={"User-Agent": "hypazo"}), timeout=timeout))
+    try:
+        with abrir(RELEASES, timeout=8) as r:
+            return json.load(r).get("tag_name")
+    except (OSError, ValueError):
+        return None
+
+
+def _numeros(v: str) -> tuple:
+    return tuple(int(x) for x in v.lstrip("v").split(".") if x.isdigit())
+
+
+def hay_nueva(actual: str, ultima: str | None) -> bool:
+    return bool(ultima) and _numeros(ultima) > _numeros(actual)
+
+
+def instalado() -> bool:
+    """¿Es la app instalada (el código vive en <home>/hypazo)? En la carpeta de desarrollo, actualizar
+    haría checkout de etiquetas en el repo de trabajo: no se permite."""
+    c = os.path.realpath(casa())
+    return os.path.isdir(os.path.join(c, "pm")) and os.path.realpath(AQUI).startswith(c + os.sep)
+
+
 def _ejecutar(cmd, **kw) -> int:
     print("$ " + " ".join(cmd))
     return subprocess.call(cmd, cwd=AQUI, **kw)
@@ -186,7 +221,9 @@ def update(canal: str = "stable") -> int:
         destino = etiquetas[0] if etiquetas else "origin/main"
     if _ejecutar([git, "checkout", "--force", destino]) != 0:
         return 1
-    if _ejecutar([uv, "pip", "install", "--python", sys.executable, "-r", os.path.join(AQUI, "requirements.txt")]) != 0:
+    # python.exe y no pythonw.exe: uv pregunta cosas al intérprete y pythonw no devuelve nada.
+    python = os.path.join(os.path.dirname(sys.executable), "python.exe") if sys.platform == "win32" else sys.executable
+    if _ejecutar([uv, "pip", "install", "--python", python, "-r", os.path.join(AQUI, "requirements.txt")]) != 0:
         return 1
     # Rehace los accesos directos (p. ej. al pasar de la consola a la ventana nativa en 0.2.0).
     return _ejecutar(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",

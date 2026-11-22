@@ -228,6 +228,39 @@ def _quitar_atajos():
     _atajos.clear()
 
 
+# ---------- Actualizaciones (Ajustes → Actualizaciones) ----------
+@app.get("/api/version")
+def version():
+    import hypazo
+    actual, ultima = hypazo.version_actual(), hypazo.ultima_version()
+    return {"actual": actual, "ultima": ultima, "hay_nueva": hypazo.hay_nueva(actual, ultima),
+            "instalado": hypazo.instalado()}
+
+
+def _lanzar_update():
+    """`hypazo update` en otro proceso (git fetch + checkout de la última versión + dependencias)."""
+    import hypazo
+    python = os.path.join(os.path.dirname(sys.executable), "python.exe") if sys.platform == "win32" else sys.executable
+    r = subprocess.run([python, os.path.join(AQUI, "hypazo.py"), "update"], cwd=AQUI, capture_output=True,
+                       text=True, encoding="utf-8", errors="replace",
+                       env=dict(os.environ, HYPAZO_HOME=hypazo.casa(), PYTHONIOENCODING="utf-8"))
+    return r.returncode, (r.stdout + r.stderr)[-1500:]
+
+
+@app.post("/api/actualizar")
+def actualizar():
+    import hypazo
+    if not hypazo.instalado():
+        raise HTTPException(409, "Solo se puede actualizar la app instalada (no la carpeta de desarrollo).")
+    if _corriendo():
+        raise HTTPException(409, "Para el cazador antes de actualizar.")
+    codigo, salida = _lanzar_update()
+    if codigo != 0:
+        raise HTTPException(500, f"No se pudo actualizar: {salida[-600:]}")
+    return {"ok": True, "version": hypazo.version_actual(),
+            "mensaje": "Actualizado. Cierra Hypazo y vuelve a abrirlo para usar la versión nueva."}
+
+
 @app.post("/api/clip-ya")
 def clip_ya():
     """Clip manual ahora mismo (salta el cooldown)."""

@@ -105,3 +105,33 @@ def test_con_consola_no_toca_las_salidas(monkeypatch):
     antes = sys.stdout
     hypazo.salidas_sin_consola()
     assert sys.stdout is antes
+
+
+def test_hay_nueva_compara_numeros_no_texto():
+    assert hypazo.hay_nueva("0.3.1", "v0.3.2")
+    assert hypazo.hay_nueva("0.3.9", "v0.10.0")          # 10 > 9, aunque "1" < "9" como texto
+    assert not hypazo.hay_nueva("0.3.1", "v0.3.1")
+    assert not hypazo.hay_nueva("0.3.1", None)           # sin conexión: no hay nada que ofrecer
+
+
+def test_ultima_version_lee_la_release_de_github():
+    import io
+    import json as j
+    abrir = lambda url, timeout: io.BytesIO(j.dumps({"tag_name": "v0.4.0"}).encode())
+    assert hypazo.ultima_version(abrir) == "v0.4.0"
+
+
+def test_ultima_version_sin_conexion_es_none():
+    def abrir(url, timeout):
+        raise OSError("sin red")
+    assert hypazo.ultima_version(abrir) is None
+
+
+def test_instalado_solo_dentro_de_la_instalacion(tmp_path, monkeypatch):
+    monkeypatch.delenv("HYPAZO_HOME", raising=False)
+    (tmp_path / "pm").mkdir()
+    monkeypatch.setattr(hypazo, "AQUI", str(tmp_path / "hypazo"))
+    assert hypazo.instalado()
+    monkeypatch.setattr(hypazo, "AQUI", str(tmp_path / "otra"))      # p. ej. la carpeta de desarrollo
+    monkeypatch.setenv("HYPAZO_HOME", str(tmp_path / "x"))
+    assert not hypazo.instalado()
