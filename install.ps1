@@ -90,6 +90,15 @@ function Get-Pin([string]$nombre) {
               Dir = Join-Path (Join-Path $script:Pm $nombre) $pin.Version }
 }
 
+# SHA-256 con .NET: Get-FileHash vive en un modulo y falla si PowerShell 5.1 hereda la ruta de
+# modulos de PowerShell 7 (pasa, por ejemplo, al lanzarlo desde pwsh o desde GitHub Actions).
+function Get-Sha256([string]$Ruta) {
+    $sha = [Security.Cryptography.SHA256]::Create()
+    $f = [IO.File]::OpenRead($Ruta)
+    try { return (($sha.ComputeHash($f) | ForEach-Object { $_.ToString("x2") }) -join "") }
+    finally { $f.Dispose(); $sha.Dispose() }
+}
+
 function Invoke-VerifiedDownload([string]$Url, [string]$Sha256, [string]$Destino, [string]$Nombre) {
     $parte = "$Destino.part"
     Remove-Item -LiteralPath $parte -Force -ErrorAction SilentlyContinue
@@ -98,7 +107,7 @@ function Invoke-VerifiedDownload([string]$Url, [string]$Sha256, [string]$Destino
     try { Invoke-WebRequest -Uri $Url -OutFile $parte -UseBasicParsing }
     catch { Remove-Item -LiteralPath $parte -Force -ErrorAction SilentlyContinue; Fail "No se pudo descargar $Nombre ($($_.Exception.Message))." }
     finally { $ProgressPreference = $prev }
-    $real = (Get-FileHash -LiteralPath $parte -Algorithm SHA256).Hash.ToLowerInvariant()
+    $real = Get-Sha256 $parte
     if ($real -ne $Sha256.ToLowerInvariant()) {
         Remove-Item -LiteralPath $parte -Force -ErrorAction SilentlyContinue
         Fail "La descarga de $Nombre no coincide con su huella SHA-256 (esperada $Sha256, recibida $real). No se ha instalado nada de $Nombre."
@@ -110,7 +119,8 @@ function Expand-Zip([string]$Zip, [string]$Destino) {
     New-Item -ItemType Directory -Force -Path $Destino | Out-Null
     $tar = Join-Path $env:SystemRoot "System32\tar.exe"
     if (Test-Path -LiteralPath $tar) { & $tar -xf $Zip -C $Destino; if ($LASTEXITCODE -eq 0) { return } }
-    Expand-Archive -LiteralPath $Zip -DestinationPath $Destino -Force
+    Add-Type -AssemblyName System.IO.Compression.FileSystem   # sin depender del modulo Archive
+    [IO.Compression.ZipFile]::ExtractToDirectory($Zip, $Destino)
 }
 
 function Install-Tool([string]$nombre) {

@@ -65,3 +65,4 @@ def test_hypazo_cmd_sin_rutas_escritas(tmp_path):
     datos = (casa / "bin" / "hypazo.cmd").read_bytes()
     datos.decode("ascii")
     assert b"%~dp0" in datos and "José".encode("utf-8") not in datos, r.stdout + r.stderr
+
