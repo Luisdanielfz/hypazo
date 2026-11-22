@@ -7,6 +7,8 @@
 #endif
 
 [Setup]
+SetupIconFile=..\assets\hypazo.ico
+UninstallDisplayIcon={localappdata}\hypazo\hypazo\assets\hypazo.ico
 AppId={{6B3F2C1E-8D4A-4E5B-9C7F-1A2B3C4D5E6F}
 AppName=Hypazo
 AppVersion={#Version}
@@ -37,7 +39,7 @@ Source: "desinstalar.ps1"; DestDir: "{app}"; Flags: ignoreversion
 
 [Run]
 Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\install.ps1"" -NonInteractive"; StatusMsg: "Instalando Hypazo: descargando herramientas y dependencias (unos minutos)..."; Flags: waituntilterminated
-Filename: "{localappdata}\hypazo\bin\hypazo.cmd"; Description: "Abrir Hypazo"; Flags: postinstall nowait skipifsilent shellexec
+Filename: "{localappdata}\hypazo\hypazo\.venv\Scripts\pythonw.exe"; Parameters: """{localappdata}\hypazo\hypazo\hypazo.py"" start"; Description: "Abrir Hypazo"; Flags: postinstall nowait skipifsilent
 
 [UninstallRun]
 Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\desinstalar.ps1"""; RunOnceId: "QuitarHypazo"; Flags: runhidden waituntilterminated

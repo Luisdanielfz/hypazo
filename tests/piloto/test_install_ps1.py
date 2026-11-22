@@ -66,3 +66,15 @@ def test_hypazo_cmd_sin_rutas_escritas(tmp_path):
     datos.decode("ascii")
     assert b"%~dp0" in datos and "José".encode("utf-8") not in datos, r.stdout + r.stderr
 
+
+
+def test_acceso_directo_abre_la_app_sin_consola(tmp_path):
+    # El acceso directo lanza pythonw.exe (sin ventana de consola) con hypazo.py start y el icono de Hypazo.
+    lnk = tmp_path / "Hypazo.lnk"
+    script = tmp_path / "atajo.ps1"
+    script.write_text(f". '{PS1}'\n$script:Codigo='{tmp_path}\hypazo'; $script:Venv=Join-Path $script:Codigo '.venv'\n"
+                      f"New-Shortcut '{lnk}'\n$l=(New-Object -ComObject WScript.Shell).CreateShortcut('{lnk}')\n"
+                      "Write-Host \"T=$($l.TargetPath)|A=$($l.Arguments)|I=$($l.IconLocation)\"\n", encoding="utf-8-sig")
+    r = subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script)],
+                       capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120)
+    assert "pythonw.exe|A=" in r.stdout and "hypazo.py\" start" in r.stdout and "hypazo.ico" in r.stdout, traza(r)

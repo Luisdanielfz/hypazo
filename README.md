@@ -34,7 +34,7 @@ Descarga `Hypazo-Setup-<versión>.exe` desde [Releases](https://github.com/Luisd
 
 | Comando | Qué hace |
 |---|---|
-| `hypazo` | Abre la app en el navegador (`http://127.0.0.1:8765`). |
+| `hypazo` | Abre la app en su propia ventana de Windows, igual que el acceso directo. |
 | `hypazo setup` | Carpeta de clips y crédito por defecto. |
 | `hypazo doctor` | Revisa que todo esté bien instalado y dice cómo arreglar lo que falle. |
 | `hypazo update` | Actualiza a la última versión publicada (`--channel main` para la última del código). |

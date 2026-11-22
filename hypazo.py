@@ -12,6 +12,8 @@ import shutil
 import socket
 import subprocess
 import sys
+import threading
+import time
 import webbrowser
 
 AQUI = os.path.dirname(os.path.abspath(__file__))
@@ -20,7 +22,14 @@ MODULOS = ("fastapi", "uvicorn", "cv2", "yt_dlp", "faster_whisper", "numpy", "PI
 
 
 def casa() -> str:
-    return os.environ.get("HYPAZO_HOME") or os.path.join(os.environ.get("LOCALAPPDATA", ""), "hypazo")
+    """<home> de la instalación. El acceso directo lanza Python sin pasar por hypazo.cmd (sin HYPAZO_HOME):
+    entonces se deduce de dónde está el código (<home>/hypazo), si al lado está la carpeta pm."""
+    if os.environ.get("HYPAZO_HOME"):
+        return os.environ["HYPAZO_HOME"]
+    arriba = os.path.dirname(AQUI)
+    if os.path.isdir(os.path.join(arriba, "pm")):
+        return arriba
+    return os.path.join(os.environ.get("LOCALAPPDATA", ""), "hypazo")
 
 
 def _ruta_config() -> str:
@@ -59,17 +68,60 @@ def _puerto_ocupado(puerto: int) -> bool:
         return s.connect_ex(("127.0.0.1", puerto)) == 0
 
 
-def start(puerto: int = PUERTO, abrir=webbrowser.open, lanzar=subprocess.call) -> int:
+ESPERA_SERVIDOR_S = 30
+
+
+def ventana(url: str, navegador=webbrowser.open) -> None:
+    """Ventana nativa de Windows (WebView2, el motor de Edge) con la interfaz de Hypazo.
+    Se bloquea hasta que el usuario la cierra. Sin pywebview o sin WebView2, abre el navegador."""
+    try:
+        import webview
+        webview.create_window("Hypazo", url, width=1280, height=860, min_size=(900, 600))
+        webview.start()
+    except Exception:              # pywebview ausente o WebView2 no disponible: que la app siga usable
+        navegador(url)
+
+
+def _servir(puerto: int) -> None:
+    import uvicorn
+    import app                     # después de fijar CLIPEO_SALIDA: app.py la lee al importarse
+    uvicorn.run(app.app, host="127.0.0.1", port=puerto, log_level="warning")
+
+
+def _parar_cazador() -> None:
+    try:
+        import app
+        app.stop()                 # un cazador en marcha no debe quedar huérfano al cerrar la ventana
+    except Exception:
+        pass
+
+
+def start(puerto: int = PUERTO, abrir=ventana, servir=_servir, parar=_parar_cazador) -> int:
     url = f"http://127.0.0.1:{puerto}"
-    if _puerto_ocupado(puerto):           # ya abierta: solo se enseña
+    if _puerto_ocupado(puerto):           # ya abierta: otra ventana sobre el mismo servidor
         abrir(url)
         return 0
     cfg = config()
     os.makedirs(cfg["salida"], exist_ok=True)
-    env = dict(os.environ, CLIPEO_SALIDA=cfg["salida"], PYTHONIOENCODING="utf-8")
+    os.environ["CLIPEO_SALIDA"] = cfg["salida"]
+    os.environ.setdefault("PYTHONIOENCODING", "utf-8")
     pm = [os.path.dirname(h) for h in (herramienta("ffmpeg"), herramienta("git")) if h]
-    env["PATH"] = os.pathsep.join(pm + [env.get("PATH", "")])
-    return lanzar([sys.executable, os.path.join(AQUI, "app.py")], cwd=AQUI, env=env)
+    os.environ["PATH"] = os.pathsep.join(pm + [os.environ.get("PATH", "")])   # ffmpeg/yt-dlp del cazador
+    if AQUI not in sys.path:
+        sys.path.insert(0, AQUI)
+    os.chdir(AQUI)                        # autoclip y compañía usan rutas relativas al código
+    threading.Thread(target=servir, args=(puerto,), daemon=True).start()
+    fin = time.monotonic() + ESPERA_SERVIDOR_S
+    while not _puerto_ocupado(puerto):
+        if time.monotonic() > fin:
+            print("La app no arrancó a tiempo: ejecuta `hypazo doctor` para ver qué falla.")
+            return 1
+        time.sleep(0.1)
+    try:
+        abrir(url)
+    finally:
+        parar()
+    return 0
 
 
 def setup(interactivo: bool = True) -> int:
@@ -122,7 +174,11 @@ def update(canal: str = "stable") -> int:
         destino = etiquetas[0] if etiquetas else "origin/main"
     if _ejecutar([git, "checkout", "--force", destino]) != 0:
         return 1
-    return _ejecutar([uv, "pip", "install", "--python", sys.executable, "-r", os.path.join(AQUI, "requirements.txt")])
+    if _ejecutar([uv, "pip", "install", "--python", sys.executable, "-r", os.path.join(AQUI, "requirements.txt")]) != 0:
+        return 1
+    # Rehace los accesos directos (p. ej. al pasar de la consola a la ventana nativa en 0.2.0).
+    return _ejecutar(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+                      os.path.join(AQUI, "install.ps1"), "-Stage", "complete"], env=dict(os.environ, HYPAZO_HOME=casa()))
 
 
 def main(argv=None) -> int:

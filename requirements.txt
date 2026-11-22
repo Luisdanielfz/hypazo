@@ -10,3 +10,4 @@ winocr>=0.0.15
 keyboard>=0.13.5
 httpx>=0.28
 pytest>=9.2
+pywebview>=6.2

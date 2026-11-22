@@ -32,7 +32,13 @@ def test_doctor_detecta_ffmpeg_ausente(tmp_path, monkeypatch, capsys):
     assert "[X] ffmpeg" in salida and "install.ps1" in salida
 
 
-def test_start_con_puerto_ocupado_abre_navegador(tmp_path, monkeypatch):
+def _puerto_libre():
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+def test_start_con_app_ya_abierta_solo_abre_ventana(tmp_path, monkeypatch):
     monkeypatch.setenv("HYPAZO_HOME", str(tmp_path))
     monkeypatch.setenv("USERPROFILE", str(tmp_path / "yo"))
     abiertas = []
@@ -40,5 +46,40 @@ def test_start_con_puerto_ocupado_abre_navegador(tmp_path, monkeypatch):
         s.bind(("127.0.0.1", 0))
         s.listen()
         puerto = s.getsockname()[1]
-        assert hypazo.start(puerto=puerto, abrir=abiertas.append, lanzar=lambda *a, **k: 1 / 0) == 0
+        assert hypazo.start(puerto=puerto, abrir=abiertas.append, servir=lambda *a: 1 / 0) == 0
     assert abiertas == [f"http://127.0.0.1:{puerto}"]
+
+
+def test_start_arranca_servidor_abre_ventana_y_al_cerrar_para(tmp_path, monkeypatch):
+    monkeypatch.setenv("HYPAZO_HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "yo"))
+    puerto, eventos, servidor = _puerto_libre(), [], socket.socket()
+
+    def servir(p):
+        servidor.bind(("127.0.0.1", p))
+        servidor.listen()
+        eventos.append("servidor")
+
+    def abrir(url):
+        eventos.append(("ventana", url, os.environ["CLIPEO_SALIDA"]))
+
+    try:
+        assert hypazo.start(puerto=puerto, abrir=abrir, servir=servir, parar=lambda: eventos.append("parar")) == 0
+    finally:
+        servidor.close()
+    assert eventos == ["servidor", ("ventana", f"http://127.0.0.1:{puerto}", str(tmp_path / "yo" / "Videos" / "Hypazo")),
+                       "parar"]
+
+
+def test_ventana_sin_webview_usa_el_navegador(monkeypatch):
+    abiertas = []
+    monkeypatch.setitem(__import__("sys").modules, "webview", None)    # import webview -> ImportError
+    hypazo.ventana("http://127.0.0.1:1", navegador=abiertas.append)
+    assert abiertas == ["http://127.0.0.1:1"]
+
+
+def test_casa_se_deduce_de_la_instalacion(tmp_path, monkeypatch):
+    monkeypatch.delenv("HYPAZO_HOME", raising=False)
+    (tmp_path / "pm").mkdir()
+    monkeypatch.setattr(hypazo, "AQUI", str(tmp_path / "hypazo"))
+    assert hypazo.casa() == str(tmp_path)

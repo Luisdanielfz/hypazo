@@ -282,8 +282,11 @@ function Stage-Setup {
 function New-Shortcut([string]$Ruta) {
     $sh = New-Object -ComObject WScript.Shell
     $lnk = $sh.CreateShortcut($Ruta)
-    $lnk.TargetPath = Join-Path $script:Bin "hypazo.cmd"
+    # pythonw.exe: abre la ventana nativa de Hypazo sin ninguna consola detras.
+    $lnk.TargetPath = Join-Path $script:Venv "Scripts\pythonw.exe"
+    $lnk.Arguments = "`"$(Join-Path $script:Codigo 'hypazo.py')`" start"
     $lnk.WorkingDirectory = $script:Codigo
+    $lnk.IconLocation = (Join-Path $script:Codigo "assets\hypazo.ico") + ",0"
     $lnk.Description = "Hypazo: clips de directos de Twitch y Kick"
     $lnk.Save()
 }
