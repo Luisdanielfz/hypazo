@@ -18,7 +18,7 @@ import webbrowser
 
 AQUI = os.path.dirname(os.path.abspath(__file__))
 PUERTO = 8765
-MODULOS = ("fastapi", "uvicorn", "cv2", "yt_dlp", "faster_whisper", "numpy", "PIL")
+MODULOS = ("fastapi", "uvicorn", "cv2", "yt_dlp", "faster_whisper", "numpy", "PIL", "webview")
 
 
 def casa() -> str:
@@ -69,6 +69,18 @@ def _puerto_ocupado(puerto: int) -> bool:
 
 
 ESPERA_SERVIDOR_S = 30
+
+
+def salidas_sin_consola() -> None:
+    """Con pythonw.exe (el acceso directo) no hay consola: sys.stdout y sys.stderr son None y cualquier
+    print o el registro de uvicorn rompen la app sin avisar. Se mandan a <home>/logs/hypazo.log."""
+    if sys.stdout is not None and sys.stderr is not None:
+        return
+    carpeta = os.path.join(casa(), "logs")
+    os.makedirs(carpeta, exist_ok=True)
+    registro = open(os.path.join(carpeta, "hypazo.log"), "a", encoding="utf-8", buffering=1)
+    sys.stdout = sys.stdout or registro
+    sys.stderr = sys.stderr or registro
 
 
 def ventana(url: str, navegador=webbrowser.open) -> None:
@@ -191,6 +203,7 @@ def main(argv=None) -> int:
     u = sub.add_parser("update", help="actualizar a la última versión")
     u.add_argument("--channel", choices=("stable", "main"), default=os.environ.get("HYPAZO_INSTALL_CHANNEL", "stable"))
     sub.add_parser("version")
+    salidas_sin_consola()
     a = ap.parse_args(argv)
 
     if a.orden == "version":

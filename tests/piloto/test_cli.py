@@ -83,3 +83,25 @@ def test_casa_se_deduce_de_la_instalacion(tmp_path, monkeypatch):
     (tmp_path / "pm").mkdir()
     monkeypatch.setattr(hypazo, "AQUI", str(tmp_path / "hypazo"))
     assert hypazo.casa() == str(tmp_path)
+
+
+def test_sin_consola_la_salida_va_a_un_registro(tmp_path, monkeypatch):
+    # Regresión: con pythonw.exe (acceso directo) sys.stdout/sys.stderr son None y uvicorn fallaba al
+    # configurar su registro: la app no abría y no decía nada.
+    import sys
+    monkeypatch.setenv("HYPAZO_HOME", str(tmp_path))
+    monkeypatch.setattr(sys, "stdout", None)
+    monkeypatch.setattr(sys, "stderr", None)
+    hypazo.salidas_sin_consola()
+    print("hola registro")
+    sys.stderr.write("error al registro\n")
+    sys.stdout.flush(); sys.stderr.flush()
+    texto = (tmp_path / "logs" / "hypazo.log").read_text(encoding="utf-8")
+    assert "hola registro" in texto and "error al registro" in texto
+
+
+def test_con_consola_no_toca_las_salidas(monkeypatch):
+    import sys
+    antes = sys.stdout
+    hypazo.salidas_sin_consola()
+    assert sys.stdout is antes
