@@ -25,6 +25,8 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from credito import credito_final
+import sin_consola
+sin_consola.activar()   # ffmpeg/yt-dlp sin ventanas de terminal
 from resumen import construir, guardar, hms, texto_exacto, texto_legible, validar
 from revision import Revision, clips_de, emparejar
 from sesion import Sesiones

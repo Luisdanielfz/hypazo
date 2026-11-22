@@ -38,6 +38,8 @@ import threading
 import time
 
 import audio
+import sin_consola
+sin_consola.activar()   # ffmpeg/yt-dlp sin ventanas de terminal
 import envivo
 from credito import credito_final
 from clipeo import SALIDA

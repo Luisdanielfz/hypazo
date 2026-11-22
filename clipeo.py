@@ -94,14 +94,19 @@ def cadenas_split(lay):
     return top, bot
 
 
+def ruta_filtro(ruta):
+    """Ruta para usar dentro de un filtro de ffmpeg: con los clips en Vídeos/Hypazo la ruta es absoluta
+    (C:/...) y los ':' sin escapar rompen el filtro. Entre comillas y con ':' escapados, como FONT."""
+    return "'" + ruta.replace("\\", "/").replace(":", "\\:") + "'"
+
+
 def convertir_split(entrada, salida, chatfile="", credito="", layout=None):
     """Formato split vertical: streamer arriba, gameplay abajo, banda de chat
     semi-transparente (pequena) encima del gameplay. Los recortes salen del
     LAYOUT del streamer; reajustar si mueve la camara o cambia de escena."""
     lay = layout or LAYOUTS["auronplay"]
     # El chat llega como archivo .ass (animado, transparente, a un lado).
-    ass_rel = chatfile.replace("\\", "/") if chatfile and os.path.exists(chatfile) else ""
-    chat_f = f",ass={ass_rel}" if ass_rel else ""
+    chat_f = f",ass={ruta_filtro(chatfile)}" if chatfile and os.path.exists(chatfile) else ""
     cap = (
         f",drawtext=fontfile={FONT}:text='{_esc_texto(credito)}':fontcolor=white"
         ":fontsize=40:box=1:boxcolor=black@0.5:boxborderw=10:x=(w-text_w)/2:y=h-96"

@@ -11,6 +11,8 @@ vod.py - Saca los mejores momentos de un directo YA HECHO (VOD de Twitch).
 Uso: python vod.py https://www.twitch.tv/videos/123 --n 10 [--split] [--credito @x]
 """
 import argparse
+import sin_consola
+sin_consola.activar()   # ffmpeg/yt-dlp sin ventanas de terminal
 import collections
 import concurrent.futures as cf
 import json
