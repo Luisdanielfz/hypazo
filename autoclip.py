@@ -45,7 +45,7 @@ from cola_render import Renderizador
 from credito import credito_final
 from clipeo import SALIDA
 from sesion import Sesiones
-from envivo import resolver_url, iniciar_captura, instantanea, recortar, recortar_split, titulo_directo, SEG
+from envivo import resolver_url, iniciar_captura, instantanea, quitar_anuncios, recortar, recortar_split, titulo_directo, SEG
 
 VENTANA = 3.0        # segundos de la ventana que mide el pico
 COOLDOWN = 90        # no sacar otro clip hasta pasados N segundos
@@ -271,6 +271,7 @@ def _trabajo_clip(a, indice, trozo, split, assf, layout, carpeta, meta, sesiones
     """El render de un clip, para el hilo de render: corta, guarda su .json y borra el trozo."""
     def trabajo():
         try:
+            quitar_anuncios(trozo)                      # fuera la pantalla de anuncios de Twitch
             if split:
                 recortar_split(a.credito, a.segundos, indice, assf, layout, carpeta, unido=trozo)
             else:
@@ -384,6 +385,9 @@ def main():
     ultimo_latido = time.time()
     if directo:
         print(f"Directo: {directo}")
+    if a.plataforma == "twitch":
+        print("AVISO: Twitch suele poner anuncios al empezar a ver un canal sin cuenta; "
+              "los clips del primer minuto o dos pueden caer en ellos.")
     print("Grabando el directo y vigilando chat" + (" y audio" if a.audio > 0 else "")
           + ". ENTER = clip manual. Ctrl+C para parar.")
     proc = iniciar_captura(url, audio=a.audio > 0)

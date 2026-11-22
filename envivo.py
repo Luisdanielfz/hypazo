@@ -152,6 +152,64 @@ def es_anuncio_clip(path):
     return img is not None and es_anuncio(img)
 
 
+MINIMO_SIN_ANUNCIO_S = 15   # menos que esto de directo real: el clip no sirve
+
+
+def tramo_sin_anuncio(marcas, paso, duracion):
+    """marcas[i]: ¿el trozo [i*paso, (i+1)*paso) es anuncio? Devuelve (ini, fin) del tramo de directo
+    real más largo (con empate, el más reciente: el momento pedido está al final) o None."""
+    mejor, ini = None, None
+    for i, anuncio in enumerate(list(marcas) + [True]):          # centinela: cierra el último tramo
+        if not anuncio and ini is None:
+            ini = i * paso
+        elif anuncio and ini is not None:
+            tramo = (ini, min(i * paso, duracion))
+            if mejor is None or tramo[1] - tramo[0] >= mejor[1] - mejor[0]:
+                mejor = tramo
+            ini = None
+    return mejor
+
+
+def _frame_es_anuncio(ruta, t):
+    import cv2
+    from calibrar import es_anuncio
+    png = f"{ruta}.{t:.1f}.png"
+    subprocess.run(["ffmpeg", "-nostdin", "-y", "-loglevel", "error", "-ss", f"{t:.2f}", "-i", ruta,
+                    "-frames:v", "1", png], capture_output=True)
+    img = cv2.imread(png)
+    if os.path.exists(png):
+        os.remove(png)
+    return img is not None and es_anuncio(img)
+
+
+def _duracion(ruta):
+    r = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", ruta],
+                       capture_output=True, text=True)
+    try:
+        return float(r.stdout.strip())
+    except ValueError:
+        return 0.0
+
+
+def quitar_anuncios(trozo, minimo=MINIMO_SIN_ANUNCIO_S, paso=SEG, detector=_frame_es_anuncio):
+    """Mira un fotograma cada 'paso' segundos y deja solo el tramo de directo real (sin la pantalla de
+    anuncios de Twitch). Antes se miraba un solo fotograma y el clip se guardaba o se tiraba entero."""
+    duracion = _duracion(trozo)
+    n = max(1, int(duracion // paso) + (1 if duracion % paso > 0.5 else 0))
+    marcas = [detector(trozo, min(i * paso + paso / 2, max(duracion - 0.1, 0))) for i in range(n)]
+    if not any(marcas):
+        return trozo
+    tramo = tramo_sin_anuncio(marcas, paso, duracion)
+    if tramo is None or tramo[1] - tramo[0] < minimo:
+        raise RuntimeError("Twitch estaba poniendo anuncios: ese momento no llegó a la señal pública")
+    tmp = trozo + ".sin_anuncio.ts"
+    subprocess.run(["ffmpeg", "-nostdin", "-y", "-loglevel", "error", "-ss", f"{tramo[0]:.2f}", "-i", trozo,
+                    "-t", f"{tramo[1] - tramo[0]:.2f}", "-c", "copy", tmp], check=True)
+    os.replace(tmp, trozo)
+    print(f"   (quito {duracion - (tramo[1] - tramo[0]):.0f} s de anuncios de Twitch del clip)")
+    return trozo
+
+
 def _render(hacer, carpeta, indice):
     """Renderiza en el buffer y mueve a salida/ solo al terminar: la galeria nunca
     ve un mp4 a medias, y parar el cazador a mitad no deja un clip corrupto."""

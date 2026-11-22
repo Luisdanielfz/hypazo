@@ -848,6 +848,7 @@ async function refrescarEstado() {
     if (abajo) log.scrollTop = log.scrollHeight;
     ultimoLog = s.log;
     pintarPulso(s.log);
+    avisarNovedades(s.log);
     pintarEnVivo(s);
     pintarBarra();
   } catch (e) { $("estadoTxt").textContent = "Sin conexión con la app"; }
@@ -920,6 +921,24 @@ function medidor(nombre, valor, umbral, unidad) {
   pista.setAttribute("role", "meter"); pista.setAttribute("aria-label", nombre);
   pista.setAttribute("aria-valuenow", pct); pista.setAttribute("aria-valuemin", 0); pista.setAttribute("aria-valuemax", 100);
   m.append(f, pista); return m;
+}
+
+/* Lo que antes solo estaba en el registro (clips descartados, anuncios quitados, avisos del cazador)
+   ahora sale como aviso en la ventana. Las líneas ya vistas al abrir la app no se repiten. */
+const vistos = new Set();
+let primeraLectura = true;
+function avisarNovedades(log) {
+  for (const l of log) {
+    if (vistos.has(l)) continue;
+    vistos.add(l);
+    if (primeraLectura) continue;
+    const fallo = /\(clip (\d+) fallo, lo salto: (.+)\)\s*$/.exec(l);
+    const anuncio = /quito (\d+) s de anuncios/.exec(l);
+    if (fallo) aviso(`Clip ${fallo[1]} descartado: ${fallo[2]}`, true);
+    else if (anuncio) aviso(`Clip recortado: se quitaron ${anuncio[1]} s de anuncios de Twitch.`);
+    else if (l.startsWith("AVISO: ")) aviso(l.slice(7));
+  }
+  primeraLectura = false;
 }
 
 function pintarPulso(log) {
