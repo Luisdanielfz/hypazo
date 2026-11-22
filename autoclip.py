@@ -41,10 +41,11 @@ import audio
 import sin_consola
 sin_consola.activar()   # ffmpeg/yt-dlp sin ventanas de terminal
 import envivo
+from cola_render import Renderizador
 from credito import credito_final
 from clipeo import SALIDA
 from sesion import Sesiones
-from envivo import resolver_url, iniciar_captura, recortar, recortar_split, titulo_directo, SEG
+from envivo import resolver_url, iniciar_captura, instantanea, recortar, recortar_split, titulo_directo, SEG
 
 VENTANA = 3.0        # segundos de la ventana que mide el pico
 COOLDOWN = 90        # no sacar otro clip hasta pasados N segundos
@@ -208,6 +209,39 @@ def escuchar_teclado(pedidos):
     threading.Thread(target=bucle, daemon=True).start()
 
 
+HUECO_S = 2.0           # bucle parado mas que esto: el chat que llegue ya es atrasado
+AVALANCHA = 120         # mensajes en una sola lectura: imposible en 0,4 s, es chat acumulado
+
+
+def es_atraso(ahora, ultima_vuelta, n_eventos):
+    """Chat que no hay que contar para disparar: lo leido tras un parón del bucle o en avalancha.
+    Sin esto, el chat acumulado (minutos) se marcaba con la hora de lectura y parecia un pico."""
+    return ahora - ultima_vuelta > HUECO_S or n_eventos >= AVALANCHA
+
+
+AL_DIA_MIN = 15         # una lectura con menos mensajes que esto (o 3x lo normal) = ya al dia
+ATRASO_MAX_S = 10       # por si acaso: nunca mas de 10 s sin contar el chat
+
+
+class Atraso:
+    """Tras un paron del bucle, el chat acumulado entra en VARIAS lecturas (~100 mensajes cada una):
+    no se cuenta para disparar hasta ponerse al dia (una lectura de tamano normal)."""
+
+    def __init__(self):
+        self.ultima = None
+        self.desde = None               # None = al dia
+
+    def contar(self, ahora, n_eventos, esperado=0.0):
+        """True si los mensajes de esta lectura cuentan para el chat. esperado: mensajes normales por lectura."""
+        if self.ultima is not None and es_atraso(ahora, self.ultima, n_eventos):
+            self.desde = self.desde or ahora
+        elif self.desde is not None and (n_eventos < max(AL_DIA_MIN, 3 * esperado)
+                                         or ahora - self.desde > ATRASO_MAX_S):
+            self.desde = None
+        self.ultima = ahora
+        return self.desde is None
+
+
 LATIDO_S = 30   # cada cuánto se apunta en la sesión que el cazador sigue vivo
 
 
@@ -231,6 +265,30 @@ def meta_piloto(motivo, sesion, tiempo, segundos, reloj=None):
     if origen == "forzado":
         meta["revisar"] = True        # pendiente de revisión: nunca se trata como un clip normal
     return meta
+
+
+def _trabajo_clip(a, indice, trozo, split, assf, layout, carpeta, meta, sesiones, sesion, cambios_layout):
+    """El render de un clip, para el hilo de render: corta, guarda su .json y borra el trozo."""
+    def trabajo():
+        try:
+            if split:
+                recortar_split(a.credito, a.segundos, indice, assf, layout, carpeta, unido=trozo)
+            else:
+                recortar(a.credito, a.segundos, indice, carpeta, unido=trozo)
+            m = dict(meta)
+            guardar_meta(carpeta, indice, m.pop("puntaje"), m.pop("unicos"), m.pop("base"), m.pop("lineas"), **m)
+            sesiones.tocar(sesion, time.time())
+            if split:                                   # ¿se movio la camara? recalibra solo
+                from clipeo import guardar_layout
+                nuevo, mensaje = vigilar_camara(a.canal, a.plataforma, layout, guardar_layout)
+                if nuevo is not layout:
+                    cambios_layout.put(nuevo)
+                if mensaje:
+                    print(mensaje)
+        finally:
+            if os.path.exists(trozo):
+                os.remove(trozo)
+    return trabajo
 
 
 def guardar_meta(carpeta, indice, puntaje, unicos, base, lineas, **extra):
@@ -348,13 +406,24 @@ def main():
     max_chat = max_gente = 0
     max_ratio = max_grito = 0.0
     indice = siguiente_indice(carpeta)
+    render = Renderizador()                     # los clips se renderizan en segundo plano
+    cambios_layout = queue.Queue()              # recalibraciones hechas por el hilo de render
+    atraso = Atraso()
     try:
         while proc.poll() is None:
             now = time.time()
-            for p, user, texto in leer(buf):
-                msgs.append((now, p, user))
+            eventos = leer(buf)
+            # ~0,4 s por lectura (timeout del socket): mensajes normales por lectura segun la base.
+            cuenta = atraso.contar(now, len(eventos), esperado=base * 0.4 / VENTANA)
+            if not cuenta:
+                msgs.clear()                    # el chat atrasado no dispara nada
+            for p, user, texto in eventos:
+                if cuenta:
+                    msgs.append((now, p, user))
                 linea = user.decode(errors="ignore") + ": " + texto.decode(errors="ignore")
                 lineas.append((now, linea[:46]))
+            while not cambios_layout.empty():
+                layout = cambios_layout.get_nowait()
             while msgs and now - msgs[0][0] > VENTANA:
                 msgs.popleft()
             puntaje = sum(p for _, p, _ in msgs)
@@ -439,28 +508,27 @@ def main():
                     ini = time.time() - a.segundos
                     t_fin = time.time()            # fin del clip: lo que cuenta en el directo
                     ventana = [(ts - ini, ln) for ts, ln in lineas if ts >= ini]
-                    if a.split and layout and not forzado:   # sin recorte o forzado: normal
-                        assf = os.path.join(carpeta, f"chat_{indice:02d}.ass")
+                    # Guarda YA el trozo del buffer: el render va a la cola y el cazador sigue.
+                    trozo = instantanea(a.segundos, os.path.join(envivo.BUF, f"clip_{indice:02d}.ts"))
+                    if not trozo:
+                        raise RuntimeError("aun no hay buffer suficiente")
+                    split = bool(a.split and layout and not forzado)   # sin recorte o forzado: normal
+                    assf = os.path.join(carpeta, f"chat_{indice:02d}.ass") if split else ""
+                    if split:
                         escribir_ass(ventana, assf)
-                        recortar_split(a.credito, a.segundos, indice, assf, layout, carpeta)
-                    else:
-                        recortar(a.credito, a.segundos, indice, carpeta)
-                    indice += 1
                     # El grito puede llegar antes que el chat: el maximo de todo el clip.
                     grito_clip = vol.pico(a.segundos) if a.audio > 0 else 0.0
-                    guardar_meta(carpeta, indice - 1, puntaje, unicos, base,
-                                 [ln for _, ln in ventana], motivo=motivo,
-                                 grito_db=round(grito_clip, 1), directo=directo,
-                                 canal=a.canal.lower(), plataforma=a.plataforma,
-                                 **meta_piloto(motivo, sesion, sesiones.tiempo(sesion, t_fin),
-                                               a.segundos, reloj=t_fin),
-                                 score=max(score, puntuacion(puntaje, base, unicos, grito_clip,
-                                                             a.factor, a.unicos, a.audio)))
-                    sesiones.tocar(sesion, time.time())
-                    if a.split and layout:          # ¿se movió la cámara? recalibra solo
-                        layout, mensaje = vigilar_camara(a.canal, a.plataforma, layout, guardar_layout)
-                        if mensaje:
-                            print(mensaje)
+                    meta = dict(puntaje=puntaje, unicos=unicos, base=base, lineas=[ln for _, ln in ventana],
+                                motivo=motivo, grito_db=round(grito_clip, 1), directo=directo,
+                                canal=a.canal.lower(), plataforma=a.plataforma,
+                                **meta_piloto(motivo, sesion, sesiones.tiempo(sesion, t_fin),
+                                              a.segundos, reloj=t_fin),
+                                score=max(score, puntuacion(puntaje, base, unicos, grito_clip,
+                                                            a.factor, a.unicos, a.audio)))
+                    render.encargar(str(indice), _trabajo_clip(
+                        a, indice, trozo, split, assf, layout, carpeta, meta, sesiones, sesion, cambios_layout))
+                    print(f"   Clip {indice} en cola de render ({render.pendientes()} pendientes). Sigo cazando.")
+                    indice += 1
                 except Exception as e:  # un clip malo no debe tumbar el cazador
                     print(f"   (clip {indice} fallo, lo salto: {e})")
                 if not forzado:                 # el forzado no gasta el enfriamiento
@@ -468,6 +536,9 @@ def main():
     except KeyboardInterrupt:
         print("\nParando...")
     finally:
+        if render.pendientes():
+            print(f"   Quedan {render.pendientes()} clips por renderizar: espero hasta 3 min...")
+            render.esperar(180)
         sesiones.cerrar(sesion, time.time())
         proc.terminate()
         s.close()

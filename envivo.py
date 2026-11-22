@@ -92,7 +92,14 @@ def iniciar_captura(url, audio=False):
     return subprocess.Popen(cmd)
 
 
-def _concatenar(segundos):
+def instantanea(segundos, destino):
+    """Copia YA los ultimos 'segundos' del buffer a su propio archivo (tarda menos de 1 s).
+    Asi el momento queda guardado aunque el render se haga despues, en segundo plano, y el
+    buffer rodante (120 s) siga avanzando."""
+    return _concatenar(segundos, destino)
+
+
+def _concatenar(segundos, unido=None):
     """Une los segmentos mas recientes del buffer y devuelve el .ts, o None."""
     segs = sorted(glob.glob(os.path.join(BUF, "seg*.ts")), key=os.path.getmtime)
     if len(segs) < 2:
@@ -101,18 +108,20 @@ def _concatenar(segundos):
     n = max(1, round(segundos / SEG))
     elegidos = segs[:-1][-n:]  # descarta el ultimo (en escritura)
     # Dentro del BUF de cada canal: dos cazadores a la vez no se pisan los temporales.
-    lista = os.path.join(BUF, "concat.txt")
+    unido = unido or os.path.join(BUF, "unido.ts")
+    lista = unido + ".txt"
     with open(lista, "w", encoding="utf-8") as f:
         for s in elegidos:
             f.write(f"file '{os.path.abspath(s)}'\n")
-    unido = os.path.join(BUF, "unido.ts")
     subprocess.run(["ffmpeg", "-nostdin", "-y", "-loglevel", "error", "-f", "concat",
                     "-safe", "0", "-i", lista, "-c", "copy", unido], check=True)
+    os.remove(lista)
     return unido
 
 
-def recortar(credito, segundos, indice, carpeta=SALIDA):
-    unido = _concatenar(segundos)
+def recortar(credito, segundos, indice, carpeta=SALIDA, unido=None):
+    """unido: la instantanea ya guardada (render en segundo plano); si no, se corta ahora."""
+    unido = unido or _concatenar(segundos)
     if not unido:
         return
     _render(lambda tmp: convertir(unido, tmp, credito), carpeta, indice)
@@ -148,7 +157,7 @@ def _render(hacer, carpeta, indice):
     ve un mp4 a medias, y parar el cazador a mitad no deja un clip corrupto."""
     os.makedirs(carpeta, exist_ok=True)
     final = os.path.join(carpeta, f"envivo_{indice:02d}.mp4")
-    tmp = os.path.join(BUF, "render.mp4")
+    tmp = os.path.join(BUF, f"render_{indice:02d}.mp4")   # propio de cada clip
     hacer(tmp)
     # El render tolera errores (un frame malo no debe tirar el clip), pero si el directo
     # trae el video roto entero (corte, anuncio) sale un mp4 SOLO con audio: no guardarlo.
@@ -164,9 +173,9 @@ def _render(hacer, carpeta, indice):
     print(f"   CLIP GUARDADO: {os.path.abspath(final)}")
 
 
-def recortar_split(credito, segundos, indice, chatfile="", layout=None, carpeta=SALIDA):
+def recortar_split(credito, segundos, indice, chatfile="", layout=None, carpeta=SALIDA, unido=None):
     from clipeo import convertir_split
-    unido = _concatenar(segundos)
+    unido = unido or _concatenar(segundos)
     if not unido:
         return
     _render(lambda tmp: convertir_split(unido, tmp, chatfile, credito, layout), carpeta, indice)
