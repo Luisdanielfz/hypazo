@@ -57,6 +57,16 @@ SCORE_MIN_AUDIO = 50 # en la prueba real, los clips por audio con score <45 eran
 CLAVES = [b"clip", b"pog", b"vamos", b"omg", b"wtf", b"kekw", b"omegalul",
           b"lmao", b"jajaj", b"increible", b"no way", b"letsgo", b"loco",
           b"crack", b"golazo", b"brutal"]
+# Risa, también en los emotes del canal: auronRisitas, rubiusXD, ibaiLUL... Las raíces cortas solo al final
+# de la palabra (si no, "sonrisa", "lolita" o "kekos" contarían como risa).
+RE_RISA = re.compile(rb"(?:ja){2,}|(?:je){2,}|jsj|risit|lmao|(?:xd+|lul|lol|kekw?)\b")
+BOTS = {b"nightbot", b"streamelements", b"streamlabs", b"moobot", b"fossabot", b"wizebot",
+        b"sery_bot", b"botrixoficial", b"kickbot"}
+
+
+def es_ruido(usuario, texto):
+    """Comandos (!followage, !sorteo...) y bots: no son gente reaccionando."""
+    return re.match(rb"\s*!\w", texto) is not None or usuario.lower() in BOTS     # "!!! GOL" sí cuenta
 
 
 def conectar_chat(canal, intentos=3):
@@ -103,7 +113,7 @@ def leer_eventos(s, buffer_ref):
 
 
 def peso(cuerpo):
-    return 2 if any(k in cuerpo for k in CLAVES) else 1
+    return 2 if any(k in cuerpo for k in CLAVES) or RE_RISA.search(cuerpo) else 1
 
 
 def abrir_chat(plataforma, canal):
@@ -111,15 +121,22 @@ def abrir_chat(plataforma, canal):
     if plataforma == "kick":
         import kick
         chat = kick.Chat(canal)
-        return chat, lambda _buf: [(peso(t), u, t) for u, t in chat.leer()]
+        return chat, lambda _buf: [(peso(t), u, t) for u, t in chat.leer() if not es_ruido(u, t)]
     s = conectar_chat(canal)
-    return s, lambda buf: leer_eventos(s, buf)
+    return s, lambda buf: [e for e in leer_eventos(s, buf) if not es_ruido(e[1], e[2])]
 
 
 def resumen_chat(lineas, n=5):
-    """Los mensajes mas repetidos de la ventana: [(texto, veces)]."""
-    textos = (ln.split(": ", 1)[-1].strip() for ln in lineas)
-    return collections.Counter(t for t in textos if t).most_common(n)
+    """Los mensajes mas repetidos de la ventana: [(texto, veces)]. "emote emote emote" cuenta
+    igual que "emote" (y sin mirar mayúsculas), y fuera comandos y bots."""
+    cuenta, como = collections.Counter(), {}
+    for ln in lineas:
+        usuario, _, texto = ln.partition(": ")
+        texto = " ".join(dict.fromkeys(texto.split()))
+        if texto and not es_ruido(usuario.encode(), texto.lower().encode()):
+            cuenta[texto.lower()] += 1
+            como.setdefault(texto.lower(), texto)     # se enseña como lo escribió el primero
+    return [(como[k], v) for k, v in cuenta.most_common(n)]
 
 
 def siguiente_indice(carpeta):

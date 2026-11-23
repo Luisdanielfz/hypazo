@@ -136,10 +136,44 @@ def start(a: Arranque):
                                 stderr=subprocess.STDOUT, text=True,
                                 encoding="utf-8", errors="replace")
         _estado.update(proc=proc, canal=f"{a.canal.lower()} ({a.plataforma})", inicio=time.time(),
-                       pausado=False)
+                       pausado=False, fav=(a.canal.lower(), a.plataforma))
         _activar_atajos()
         threading.Thread(target=_leer_salida, args=(proc,), daemon=True).start()
+    _recordar_arranque(a)
     return {"ok": True}
+
+
+# ---------- Modo centinela: arranca solo cuando un favorito entra en directo ----------
+POR_CANAL = ("canal", "plataforma", "credito", "split")     # lo demás (sensibilidad) vale para todos
+
+
+def _recordar_arranque(a):
+    import api_asistente
+    try:
+        api_asistente._guardar(lambda c: {**c, "ultimo_arranque": a.model_dump(exclude=set(POR_CANAL))})
+    except Exception:       # la caza ya está en marcha: que no guardar la preferencia no la convierta en error
+        pass
+
+
+def _ajustes_centinela():
+    import hypazo
+    cfg = hypazo.config()
+    return bool(cfg.get("centinela")), [(f["canal"], f["plataforma"]) for f in cfg.get("favoritos", [])]
+
+
+def _arrancar_favorito(fav):
+    """El centinela arranca con la sensibilidad de la última caza; split si ese canal tiene recorte."""
+    import hypazo
+    canal, plataforma = fav
+    ultimo = {k: v for k, v in (hypazo.config().get("ultimo_arranque") or {}).items()
+              if k in Arranque.model_fields and k not in POR_CANAL}
+    start(Arranque(**ultimo, canal=canal, plataforma=plataforma, split=canal in api_recortes._leer_layouts()))
+    avisador("Hypazo", f"{canal} entró en directo: empiezo a cazar.")
+
+
+import centinela as _centinela_mod                       # noqa: E402
+_centinela = _centinela_mod.Centinela(corriendo=lambda: _corriendo(), arrancar=lambda f: _arrancar_favorito(f),
+                                      ajustes=lambda: _ajustes_centinela())
 
 
 RE_VOD = re.compile(r"^https?://(?:www\.|m\.)?twitch\.tv/videos/\d+(?:\?.*)?$")
@@ -181,7 +215,7 @@ def vod(v: Vod):
         proc = subprocess.Popen(cmd, cwd=AQUI, env=env, stdin=subprocess.DEVNULL,
                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                                 encoding="utf-8", errors="replace")
-        _estado.update(proc=proc, canal="VOD " + url.rsplit("/", 1)[-1].split("?")[0],
+        _estado.update(proc=proc, fav=None, canal="VOD " + url.rsplit("/", 1)[-1].split("?")[0],
                        inicio=time.time())
         threading.Thread(target=_leer_salida, args=(proc,), daemon=True).start()
     return {"ok": True}
@@ -198,6 +232,8 @@ def stop():
                        capture_output=True)
         _log.append("[parado desde la app]")
         _quitar_atajos()
+        if _estado.get("fav"):
+            _centinela.parado_a_mano(*_estado["fav"])   # no volver a arrancarlo hasta que termine su directo
     return {"ok": True}
 
 
@@ -318,7 +354,7 @@ def clip_ya():
 def status():
     return {"corriendo": _corriendo(), "canal": _estado["canal"], "pausado": _estado["pausado"],
             "inicio": _estado["inicio"], "log": list(_log)[-120:], "vivos": _vivos.lista(),
-            "serie": _serie.datos()}
+            "serie": _serie.datos(), "centinela": _centinela.estado()}
 
 
 PAPELERA = "_papelera"   # carpetas con '_' no salen en la galeria
@@ -808,5 +844,6 @@ if __name__ == "__main__":
             webbrowser.open(URL)
             sys.exit(0)
     threading.Timer(1.5, webbrowser.open, args=(URL,)).start()
+    _centinela.vigilar()
     print(f"Clipeo abierto en {URL}  (cierra esta ventana para apagarlo)")
     uvicorn.run(app, host="127.0.0.1", port=PUERTO, log_level="warning")

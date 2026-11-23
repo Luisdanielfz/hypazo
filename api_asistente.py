@@ -45,7 +45,7 @@ def _vista(cfg: dict) -> dict:
     # La carpeta que usa de verdad el servidor (hypazo start la fija en CLIPEO_SALIDA).
     salida = os.environ.get("CLIPEO_SALIDA") or cfg["salida"]
     return {"bienvenida_vista": bool(cfg.get("bienvenida_vista")), "salida": salida,
-            "favoritos": cfg.get("favoritos", []), "ia": ia.publico(cfg.get("ia", {})), "catalogo": ia.catalogo()}
+            "favoritos": cfg.get("favoritos", []), "centinela": bool(cfg.get("centinela")), "ia": ia.publico(cfg.get("ia", {})), "catalogo": ia.catalogo()}
 
 
 @router.get("/api/preferencias")
@@ -61,6 +61,7 @@ class Favorito(BaseModel):
 class Preferencias(BaseModel):
     bienvenida_vista: bool | None = None
     favoritos: list[Favorito] | None = Field(None, max_length=MAX_FAVORITOS)
+    centinela: bool | None = None
 
 
 @router.post("/api/preferencias")
@@ -68,6 +69,8 @@ def cambiar_preferencias(p: Preferencias):
     cambios = {}
     if p.bienvenida_vista is not None:
         cambios["bienvenida_vista"] = p.bienvenida_vista
+    if p.centinela is not None:
+        cambios["centinela"] = p.centinela
     if p.favoritos is not None:
         if any(not RE_CANAL.match(f.canal) for f in p.favoritos):
             raise HTTPException(400, "Nombre de canal inválido en favoritos.")

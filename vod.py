@@ -26,10 +26,10 @@ import time
 import urllib.request
 
 import audio
-from autoclip import BASE_SEG, COOLDOWN, VENTANA, peso, puntuacion, resumen_chat
+import comunidad
+from autoclip import BASE_SEG, COOLDOWN, VENTANA, es_ruido, peso, puntuacion, resumen_chat
 
-GQL = "https://gql.twitch.tv/gql"
-CLIENT_ID = "kimne78kx3ncx6brgo4mv6wki5h1ko"     # el del reproductor web (público)
+from comunidad import CLIENT_ID, GQL
 HASH_COMENTARIOS = "b70a3591ff0f4e0313d126c6a1502d79a1c02baebb288227c582044aa76adf6a"
 RE_VOD = re.compile(r"^https?://(?:www\.|m\.)?twitch\.tv/videos/(\d+)")
 HILOS = 8
@@ -92,7 +92,9 @@ def linea_de_tiempo(msgs, duracion, factor, unicos_min):
     """Por cada segundo: (puntaje de la ventana de 3 s, personas, base, score sin audio)."""
     por_seg = collections.defaultdict(list)
     for t, u, txt in msgs:
-        por_seg[int(t)].append((peso(txt.lower().encode()), u))
+        cuerpo = txt.lower().encode()
+        if not es_ruido(u.encode(), cuerpo):
+            por_seg[int(t)].append((peso(cuerpo), u))
     v = int(VENTANA)
     puntajes, gente = [], []
     for s in range(duracion + 1):
@@ -120,6 +122,16 @@ def mejores_picos(linea, n, separacion=COOLDOWN):
         if all(abs(s - e) >= separacion for e in elegidos):
             elegidos.append(s)
     return elegidos
+
+
+def elegir(picos, linea, gritos, vistas, n, factor, unicos, audio_min):
+    """Los n mejores picos: score del chat y del audio + bono por los clips que creó la gente.
+    Devuelve (elegidos, score)."""
+    def score(s):
+        pt, gen, base, _ = linea[s]
+        return min(99, puntuacion(pt, base, gen, gritos.get(s, 0.0), factor, unicos, audio_min)
+                   + comunidad.bono(vistas.get(s, 0)))
+    return sorted(picos, key=lambda s: (score(s), linea[s][0] / linea[s][2]), reverse=True)[:n], score
 
 
 def _url_formato(vod_url, formato):
@@ -221,6 +233,13 @@ def main():
     linea = linea_de_tiempo(msgs, duracion, a.factor, a.unicos)
     n_cand = a.n * (CANDIDATOS_POR_CLIP if a.audio > 0 else 1)
     picos = mejores_picos(linea, n_cand)
+    clips_com = comunidad.clips_del_vod(canal, video_id)
+    vistas = collections.Counter()
+    for s, v in comunidad.repartir(picos, clips_com, COOLDOWN, max_nuevos=a.n).items():
+        vistas[min(s, duracion)] += v
+    if clips_com:
+        print(f"   La gente creó {len(clips_com)} clips de este VOD (de los más vistos): cuentan para elegir.")
+    picos = sorted(set(picos) | set(vistas))
     if not picos:
         sys.exit("No encontré ningún pico de chat en este VOD.")
 
@@ -239,10 +258,7 @@ def main():
     else:
         print("3/4 Audio desactivado: solo chat.")
 
-    def score(s):
-        pt, gen, base, _ = linea[s]
-        return puntuacion(pt, base, gen, gritos[s], a.factor, a.unicos, a.audio)
-    elegidos = sorted(picos, key=lambda s: (score(s), linea[s][0] / linea[s][2]), reverse=True)[:a.n]
+    elegidos, score = elegir(picos, linea, gritos, vistas, a.n, a.factor, a.unicos, a.audio)
 
     from clipeo import LAYOUTS
     layout = LAYOUTS.get(canal) if a.split else None
@@ -261,7 +277,8 @@ def main():
         destino = os.path.join(carpeta, f"vod_{indice:02d}.mp4")
         minuto = f"{s // 3600}:{s % 3600 // 60:02d}:{s % 60:02d}"
         print(f"   [{puesto}/{len(elegidos)}] momento {minuto}, score {score(s)}, "
-              f"grito +{gritos[s]:.0f} dB ...", flush=True)
+              f"grito +{gritos[s]:.0f} dB"
+              + (f", {vistas[s]} vistas en clips de la gente" if vistas.get(s) else "") + " ...", flush=True)
         try:
             renderizar(video_url, ini, fin, destino, a.credito, a.split, layout, chat)
         except (subprocess.SubprocessError, OSError, RuntimeError) as e:
@@ -272,7 +289,7 @@ def main():
                 "top_chat": resumen_chat([f"{u}: {x}" for _, u, x in chat]),
                 "motivo": "vod", "grito_db": round(gritos[s], 1), "directo": titulo,
                 "canal": canal, "plataforma": "twitch", "score": score(s),
-                "vod": a.url, "momento": s}
+                "vod": a.url, "momento": s, "comunidad_vistas": vistas.get(s, 0)}
         with open(destino[:-4] + ".json", "w", encoding="utf-8") as f:
             json.dump(meta, f, ensure_ascii=False)
         print(f"   CLIP GUARDADO: {os.path.abspath(destino)}", flush=True)

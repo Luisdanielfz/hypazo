@@ -83,6 +83,7 @@ async function refrescarEstado() {
     $("pausa").hidden = !corriendo || vodCorriendo;
     $("mini").hidden = !corriendo || vodCorriendo;
     pausado = !!s.pausado; pintarPausa();
+    if (prefs.centinela && s.centinela) $("centinelaTxt").textContent = s.centinela;
     const log = $("log"), abajo = log.scrollTop + log.clientHeight >= log.scrollHeight - 20;
     log.textContent = s.log.length ? s.log.join("\n") : "Sin actividad.";
     if (abajo) log.scrollTop = log.scrollHeight;
@@ -1150,8 +1151,17 @@ async function cargarPrefs() {
   return prefs;
 }
 async function guardarPrefs(cambios) { prefs = await api("/api/preferencias", json("POST", cambios)); pintarFavs(); }
+const CENTINELA_AYUDA = "Mira tus favoritos cada minuto, por orden, mientras Hypazo esté abierto.";
+$("centinela").onchange = async e => {
+  const si = e.target.checked;
+  try {
+    await guardarPrefs({ centinela: si });
+    $("centinelaTxt").textContent = si ? (prefs.favoritos.length ? "Activado: lo miro en menos de un minuto." : "Guarda algún favorito (★) para que pueda vigilarlo.") : CENTINELA_AYUDA;
+  } catch (err) { e.target.checked = !si; aviso(err.message, true); }
+};
 
 function pintarFavs() {
+  $("centinela").checked = !!prefs.centinela;
   const caja = $("favs");
   const canal = $("canal").value.trim().toLowerCase(), plat = $("plataforma").value;
   const es = prefs.favoritos.some(f => f.canal === canal && f.plataforma === plat);

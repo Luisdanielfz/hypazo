@@ -144,6 +144,7 @@ def _bandeja(w):
 def _servir(puerto: int) -> None:
     import uvicorn
     import app                     # después de fijar CLIPEO_SALIDA: app.py la lee al importarse
+    app._centinela.vigilar()       # modo centinela (no hace nada si está apagado en Cazar)
     uvicorn.run(app.app, host="127.0.0.1", port=puerto, log_level="warning")
 
 
