@@ -28,7 +28,7 @@ def test_producir_avisa_de_cada_paso(tmp_path, monkeypatch):
     import subprocess
     subprocess.run(["ffmpeg", "-nostdin", "-y", "-loglevel", "error", "-f", "lavfi", "-i", "color=black:s=320x568:d=2",
                     "-f", "lavfi", "-i", "anullsrc", "-t", "2", "-shortest", str(src)], check=True)
-    out, _n = produccion.producir(str(src), "HOLA", True, out=str(tmp_path / "o.mp4"),
+    out, _n, _info = produccion.producir(str(src), "HOLA", True, out=str(tmp_path / "o.mp4"),
                                   aviso=lambda paso, pct=None: pasos.append(paso))
     assert out.endswith("o.mp4") and pasos[0].startswith("Transcribiendo") and "Montando el vídeo" in pasos
 

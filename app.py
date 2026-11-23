@@ -621,6 +621,7 @@ def clip_cortar(c: Corte):
             os.remove(out)
         raise HTTPException(500, "FFmpeg fallo: " + (e.stderr or "").strip()[-300:])
     meta = {k: v for k, v in _meta(src).items() if k != "estado"}
+    meta["remate"] = _remate_tras_corte(src, c.ini, c.fin)
     _guardar_meta(out, {**meta, "estado": "bueno", "de": c.nombre,
                         "corte": [round(c.ini, 2), round(c.fin, 2)]})
     return {"ok": True, "nombre": os.path.basename(out)}
@@ -630,6 +631,8 @@ class Produccion(ClipRef):
     titulo: str = Field("", max_length=80)
     subtitulos: bool = True
     estilo: Literal["amarillo", "caja", "minimal"] = "amarillo"
+    ajustar: bool = False       # empezar en una frase (cortes.py)
+    cold_open: bool = False     # abrir con el momento
 
 
 class Marca(BaseModel):
@@ -669,7 +672,8 @@ def clip_producir(p: Produccion):
         raise HTTPException(409, "Ya hay un clip produciendose. Espera a que termine.")
     clave = f"{p.carpeta}/{p.nombre}"
     try:
-        out, n = producir(src, p.titulo, p.subtitulos, p.estilo, out=destino, aviso=progreso.avisador(clave))
+        out, n, info = producir(src, p.titulo, p.subtitulos, p.estilo, out=destino, aviso=progreso.avisador(clave),
+                                ajustar=p.ajustar, cold_open=p.cold_open, remate=_remate(src))
     except subprocess.CalledProcessError as e:
         raise HTTPException(500, "FFmpeg fallo: " + (e.stderr or "")[-300:])
     finally:
@@ -682,8 +686,35 @@ def clip_producir(p: Produccion):
                     os.remove(f)
     meta = {k: v for k, v in _meta(src).items() if k != "estado"}
     _guardar_meta(out, {**meta, "estado": "bueno", "producido": True, "titulo": p.titulo,
-                        "estilo": p.estilo, "de": p.nombre, "origen": p.carpeta})
-    return {"ok": True, "nombre": os.path.basename(out), "carpeta": PARA_SUBIR, "palabras": n}
+                        "estilo": p.estilo, "de": p.nombre, "origen": p.carpeta,
+                        "corte_inicio": info["inicio"], "cold_open": info["cold_open"]})
+    return {"ok": True, "nombre": os.path.basename(out), "carpeta": PARA_SUBIR, "palabras": n, **info}
+
+
+def _remate_tras_corte(src, ini, fin):
+    """Dónde queda el pico en un trozo [ini, fin] del clip: segundos hasta el final, o None si queda fuera."""
+    from produccion import _duracion
+    remate = _remate(src)
+    if remate is None:
+        return None
+    try:
+        dur = _duracion(src)
+    except (subprocess.SubprocessError, OSError, ValueError):
+        return None
+    pico, fin = dur - remate, min(fin, dur)
+    return round(fin - pico, 2) if ini <= pico <= fin else None
+
+
+def _remate(mp4):
+    """Segundos entre el pico y el final del clip, o None si no se sabe (un corte a mano sin el pico dentro).
+    Los clips de antes de la 0.10 no lo guardan: 7, el de serie (salvo los cortes a mano: no se sabe)."""
+    meta = _meta(mp4)
+    if "remate" not in meta:
+        return None if "corte" in meta else 7.0
+    try:
+        return min(60.0, max(0.0, float(meta["remate"])))
+    except (TypeError, ValueError):
+        return None
 
 
 class Mover(ClipRef):

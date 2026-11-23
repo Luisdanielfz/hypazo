@@ -848,9 +848,17 @@ $("edCortar").onclick = () => {
   if (!(b > a)) { $("edErr").textContent = "El fin tiene que ir después del inicio."; return; }
   trabajo($("edCortar"), "Exportando…", "/api/clip/cortar", { ...edRef, ini: a, fin: b }, r => `Corte creado: ${r.nombre}`);
 };
+// Las dos opciones del montaje se recuerdan (la de frase viene marcada; abrir con el momento, no)
+$("edAjustar").checked = leer("edAjustar", "1") === "1"; $("edCold").checked = leer("edCold", "0") === "1";
+for (const id of ["edAjustar", "edCold"]) $(id).addEventListener("change", e => guardar(id, e.target.checked ? "1" : "0"));
+const comoQuedo = r => [r.inicio > 0 ? `empieza en el segundo ${Math.round(r.inicio)}`
+                          : $("edAjustar").checked ? "sin una frase clara para empezar: entero" : "",
+                        r.cold_open ? "abre con el momento" : ""].filter(Boolean).join(", ");
 $("edProducir").onclick = () => trabajo($("edProducir"), "Produciendo… (~1 min)", "/api/clip/producir",
-  { ...edRef, titulo: $("edTitulo2").value.trim(), subtitulos: $("edSubs").checked, estilo: $("edEstilo").value },
-  r => `Listo en PARA SUBIR: ${r.nombre}` + (r.palabras ? ` (${r.palabras} palabras)` : ""), edRef.carpeta + "/" + edRef.nombre);
+  { ...edRef, titulo: $("edTitulo2").value.trim(), subtitulos: $("edSubs").checked, estilo: $("edEstilo").value,
+    ajustar: $("edAjustar").checked, cold_open: $("edCold").checked },
+  r => `Listo en PARA SUBIR: ${r.nombre}` + (r.palabras ? ` (${r.palabras} palabras)` : "")
+       + (comoQuedo(r) ? ` · ${comoQuedo(r)}` : ""), edRef.carpeta + "/" + edRef.nombre);
 
 /* ---------- ajustes: recortes por streamer ---------- */
 let lays = {};

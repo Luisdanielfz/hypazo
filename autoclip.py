@@ -587,7 +587,7 @@ def main():
                     grito_clip = vol.pico(a.segundos) if a.audio > 0 else 0.0
                     meta = dict(puntaje=puntaje, unicos=unicos, base=base, lineas=[ln for _, ln in ventana],
                                 motivo=motivo, grito_db=round(grito_clip, 1), directo=directo,
-                                canal=a.canal.lower(), plataforma=a.plataforma,
+                                canal=a.canal.lower(), plataforma=a.plataforma, remate=a.postroll,
                                 **meta_piloto(motivo, sesion, sesiones.tiempo(sesion, t_fin),
                                               a.segundos, reloj=t_fin),
                                 score=max(score, puntuacion(puntaje, base, unicos, grito_clip,

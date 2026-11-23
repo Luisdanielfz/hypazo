@@ -29,6 +29,7 @@ import tempfile
 import threading
 
 import clipeo
+import cortes
 
 MODELO = "small"        # base = mas rapido / peor; small va bien en español en CPU
 PALABRAS_POR_GRUPO = 3
@@ -216,34 +217,78 @@ def _ffmpeg_con_progreso(cmd, cwd, duracion, aviso):
         raise subprocess.CalledProcessError(proc.returncode, cmd, stderr="".join(err))
 
 
-def producir(src, titulo="", subtitulos=True, estilo="amarillo", marca=None, out=None, aviso=None):
+def _tiene_audio(path):
+    r = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "a", "-show_entries", "stream=index",
+                        "-of", "csv=p=0", path], capture_output=True, text=True)
+    return bool(r.stdout.strip())
+
+
+def _filtro_montaje(partes, audio):
+    """filter_complex que pega los tramos [(desde, hasta)] y quema los subtítulos -> [v] y [a]."""
+    trozos, entradas = [], ""
+    for k, (a, b) in enumerate(partes):
+        trozos.append(f"[0:v]trim=start={a:.3f}:end={b:.3f},setpts=PTS-STARTPTS[v{k}]")
+        entradas += f"[v{k}]"
+        if audio:
+            trozos.append(f"[0:a]atrim=start={a:.3f}:end={b:.3f},asetpts=PTS-STARTPTS[a{k}]")
+            entradas += f"[a{k}]"
+    salida = "[m][a]" if audio else "[m]"
+    trozos.append(f"{entradas}concat=n={len(partes)}:v=1:a={int(audio)}{salida}")
+    trozos.append("[m]ass=prod.ass[v]")
+    return ";".join(trozos)
+
+
+def producir(src, titulo="", subtitulos=True, estilo="amarillo", marca=None, out=None, aviso=None,
+             ajustar=False, cold_open=False, remate=7.0):
     """Crea el clip para TikTok en `out` (por defecto <src>_tiktok.mp4).
-    aviso(paso, pct=None), si se da, recibe en qué paso va. Devuelve (ruta, n_palabras)."""
+    ajustar: empezar en una frase (cortes.inicio); cold_open: abrir con el momento. El pico del chat está
+    `remate` segundos antes del final (None = no se sabe: ni corte ni cold open). aviso(paso, pct=None), si se da,
+    recibe en qué paso va.
+    Devuelve (ruta, n_palabras, {"inicio": s, "cold_open": bool})."""
     aviso = aviso or (lambda paso, pct=None: None)
     out = out or src[:-4] + "_tiktok.mp4"
-    if subtitulos:
+    if remate is None:
+        ajustar = cold_open = False
+    if subtitulos or ajustar:
         aviso("Transcribiendo lo que se dice")
-    palabras = transcribir(src) if subtitulos else []
+    if subtitulos:
+        palabras = transcribir(src)
+    elif ajustar:
+        try:                    # solo para el corte: si Whisper falla, el clip sale entero como antes
+            palabras = transcribir(src)
+        except Exception:
+            palabras = []
+    else:
+        palabras = []
     tmpdir = tempfile.mkdtemp(prefix="clipeo_")
     try:
         aviso("Poniendo título y subtítulos")
         ass = os.path.join(tmpdir, "prod.ass")
         duracion = _duracion(src)
-        escribir_ass(palabras, titulo, duracion, ass, estilo,
+        pico = max(0.0, duracion - (remate or 0.0))
+        ini = cortes.inicio(palabras, pico) if ajustar else 0.0
+        partes = cortes.tramos(duracion, pico, ini, cold_open)
+        total = sum(b - a for a, b in partes)
+        escribir_ass(cortes.recolocar(palabras, partes) if subtitulos else [], titulo, total, ass, estilo,
                      cargar_marca() if marca is None else marca)
         tmp_mp4 = os.path.join(tmpdir, "prod.mp4")
         aviso("Montando el vídeo", 0)
+        if partes == [(0.0, duracion)]:
+            montaje = ["-vf", "ass=prod.ass"]
+        else:
+            audio = _tiene_audio(src)
+            montaje = ["-filter_complex", _filtro_montaje(partes, audio), "-map", "[v]"] + (["-map", "[a]"] if audio else [])
         # cwd=tmpdir y nombre relativo: evita escapar 'C:' dentro del filtro ass=
         clipeo.con_respaldo(lambda video: _ffmpeg_con_progreso(
             ["ffmpeg", "-nostdin", "-y", "-loglevel", "error", "-i", os.path.abspath(src),
-             "-vf", "ass=prod.ass", "-r", "30", *video, "-c:a", "aac", "-b:a", "128k", "prod.mp4"],
-            tmpdir, duracion, aviso), "5000k")
+             *montaje, "-r", "30", *video, "-c:a", "aac", "-b:a", "128k", "prod.mp4"],
+            tmpdir, total, aviso), "5000k")
         if os.path.exists(out):     # re-producir: en Windows move no pisa un archivo
             os.remove(out)
         shutil.move(tmp_mp4, out)   # aparece entero o no aparece
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
-    return out, len(palabras)
+    return out, len(palabras) if subtitulos else 0, {"inicio": float(round(ini, 2)), "cold_open": cold_open}
 
 
 def main():
@@ -257,7 +302,7 @@ def main():
     destino = os.path.join(os.path.dirname(os.path.abspath(__file__)), SALIDA, "PARA SUBIR")
     os.makedirs(destino, exist_ok=True)
     out, viejos = ruta_para_subir(os.path.abspath(a.clip), a.titulo, destino)
-    out, n = producir(a.clip, a.titulo, not a.sin_subs, a.estilo, out=out)
+    out, n, _info = producir(a.clip, a.titulo, not a.sin_subs, a.estilo, out=out)
     for v in viejos:
         if os.path.abspath(v) != os.path.abspath(out):
             os.remove(v)

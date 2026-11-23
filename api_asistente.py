@@ -229,7 +229,7 @@ def _producir(a):
     return m.clip_producir(m.Produccion(carpeta=str(a.get("carpeta", "")), nombre=str(a.get("nombre", "")),
                                         titulo=str(a.get("titulo") or "")[:80],
                                         estilo=a.get("estilo") if a.get("estilo") in ("amarillo", "caja", "minimal")
-                                        else "amarillo"))
+                                        else "amarillo", ajustar=True))
 
 
 # Solo tras pulsar Confirmar en el chat. Cada una pasa por el endpoint de siempre (y su validación).

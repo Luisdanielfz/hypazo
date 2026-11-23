@@ -289,7 +289,7 @@ def main():
                 "top_chat": resumen_chat([f"{u}: {x}" for _, u, x in chat]),
                 "motivo": "vod", "grito_db": round(gritos[s], 1), "directo": titulo,
                 "canal": canal, "plataforma": "twitch", "score": score(s),
-                "vod": a.url, "momento": s, "comunidad_vistas": vistas.get(s, 0)}
+                "vod": a.url, "momento": s, "comunidad_vistas": vistas.get(s, 0), "remate": a.remate}
         with open(destino[:-4] + ".json", "w", encoding="utf-8") as f:
             json.dump(meta, f, ensure_ascii=False)
         print(f"   CLIP GUARDADO: {os.path.abspath(destino)}", flush=True)
