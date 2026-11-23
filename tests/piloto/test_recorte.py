@@ -4,6 +4,7 @@ import os
 import pytest
 from fastapi.testclient import TestClient
 
+import api_recortes
 import app as app_mod
 import autoclip
 import clipeo
@@ -59,18 +60,18 @@ def test_frame_del_directo_y_ultimo_guardado_si_no_esta_en_vivo(tmp_path, monkey
     png = tmp_path / "f.png"
     Image.new("RGB", (1920, 1080)).save(png)
     c = TestClient(app_mod.app)
-    monkeypatch.setattr(app_mod, "_frame_en_vivo", lambda canal, plat: str(png))
+    monkeypatch.setattr(api_recortes, "_frame_en_vivo", lambda canal, plat: str(png))
     r = c.get("/api/frame", params={"canal": "ibai"})
     assert r.status_code == 200 and r.headers["x-ancho"] == "1920" and r.headers["x-alto"] == "1080"
     assert "x-viejo" not in r.headers
 
     def caido(canal, plat):
         raise RuntimeError("offline")
-    monkeypatch.setattr(app_mod, "_frame_en_vivo", caido)
-    monkeypatch.setattr(app_mod, "_frame_guardado", lambda canal, plat: str(png))
+    monkeypatch.setattr(api_recortes, "_frame_en_vivo", caido)
+    monkeypatch.setattr(api_recortes, "_frame_guardado", lambda canal, plat: str(png))
     r = c.get("/api/frame", params={"canal": "ibai"})
     assert r.status_code == 200 and int(r.headers["x-viejo"]) >= 0
-    monkeypatch.setattr(app_mod, "_frame_guardado", lambda canal, plat: None)
+    monkeypatch.setattr(api_recortes, "_frame_guardado", lambda canal, plat: None)
     assert c.get("/api/frame", params={"canal": "ibai"}).status_code == 404
     assert c.get("/api/frame", params={"canal": "../x"}).status_code == 400
 
@@ -125,6 +126,6 @@ def test_frame_roto_o_error_raro_no_da_500(tmp_path, monkeypatch):
 
     def raro(canal, plat):
         raise ValueError("cv2 se quejó")
-    monkeypatch.setattr(app_mod, "_frame_en_vivo", raro)
-    monkeypatch.setattr(app_mod, "_frame_guardado", lambda canal, plat: str(roto))
+    monkeypatch.setattr(api_recortes, "_frame_en_vivo", raro)
+    monkeypatch.setattr(api_recortes, "_frame_guardado", lambda canal, plat: str(roto))
     assert c.get("/api/frame", params={"canal": "ibai"}).status_code == 404

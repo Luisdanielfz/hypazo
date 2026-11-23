@@ -4,7 +4,6 @@ app.py - UI local para el clipeo. Envuelve autoclip.py (no lo reescribe).
 Uso:   python app.py      -> abre http://127.0.0.1:8765
 """
 import collections
-import glob
 import json
 import os
 import re
@@ -24,15 +23,13 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+import clipeo
 from clips_vivos import ClipsVivos
 import progreso
 from serie_chat import SerieChat
 from credito import credito_final
 import sin_consola
 sin_consola.activar()   # ffmpeg/yt-dlp sin ventanas de terminal
-from resumen import construir, guardar, hms, texto_exacto, texto_legible, validar
-from revision import Revision, clips_de, emparejar
-from sesion import Sesiones
 
 AQUI = os.path.dirname(os.path.abspath(__file__))
 # Sobrescribibles solo para probar la limpieza con datos falsos sin tocar los clips reales.
@@ -41,8 +38,6 @@ BUFFER = os.environ.get("CLIPEO_BUFFER") or os.path.join(AQUI, "buffer")
 LAYOUTS_JSON = os.path.join(AQUI, "layouts.json")
 PUERTO = 8765
 
-RE_CANAL = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_-]{1,24}$")   # Kick admite '-'
-RE_RECORTE = re.compile(r"^\d{1,4}:\d{1,4}:\d{1,4}:\d{1,4}$")
 
 os.makedirs(SALIDA, exist_ok=True)
 app = FastAPI(title="Clipeo")
@@ -55,6 +50,15 @@ os.makedirs(os.path.join(AQUI, "assets"), exist_ok=True)
 app.mount("/assets", StaticFiles(directory=os.path.join(AQUI, "assets")), name="assets")
 from api_asistente import router as _router_asistente   # preferencias, proveedores de IA y chat
 app.include_router(_router_asistente)
+import api_recortes                                      # Ajustes → Recortes
+from api_recortes import RE_CANAL, validar_layouts       # noqa: F401  (validar_layouts: la usan los tests)
+api_recortes.buffer_dir = lambda: BUFFER
+api_recortes.layouts_json = lambda: LAYOUTS_JSON
+app.include_router(api_recortes.router)
+import api_revision                                      # Clips → Revisar directo
+api_revision.salida = lambda: SALIDA
+api_revision._ruta_clip = lambda carpeta, nombre: ruta_clip(carpeta, nombre)
+app.include_router(api_revision.router)
 
 # Estado del cazador: uno a la vez.
 _lock = threading.Lock()
@@ -571,60 +575,19 @@ def clip_cortar(c: Corte):
     while os.path.exists(out := f"{base}_corte{'' if n == 1 else n}.mp4"):
         n += 1
     # Re-codifica (no -c copy): copiar cortaria en el keyframe y perderias el gancho.
-    r = subprocess.run(
-        ["ffmpeg", "-y", "-loglevel", "error", "-ss", f"{c.ini:.2f}", "-to", f"{c.fin:.2f}",
-         "-i", src, "-r", "30", "-c:v", "libx264", "-preset", "veryfast", "-b:v", "4000k",
-         "-c:a", "aac", "-b:a", "128k", out],
-        capture_output=True, text=True)
-    if r.returncode != 0:
+    try:
+        clipeo.con_respaldo(lambda video: subprocess.run(
+            ["ffmpeg", "-y", "-loglevel", "error", "-ss", f"{c.ini:.2f}", "-to", f"{c.fin:.2f}",
+             "-i", src, "-r", "30", *video, "-c:a", "aac", "-b:a", "128k", out],
+            capture_output=True, text=True, check=True))
+    except subprocess.CalledProcessError as e:
         if os.path.exists(out):
             os.remove(out)
-        raise HTTPException(500, "FFmpeg fallo: " + r.stderr.strip()[-300:])
+        raise HTTPException(500, "FFmpeg fallo: " + (e.stderr or "").strip()[-300:])
     meta = {k: v for k, v in _meta(src).items() if k != "estado"}
     _guardar_meta(out, {**meta, "estado": "bueno", "de": c.nombre,
                         "corte": [round(c.ini, 2), round(c.fin, 2)]})
     return {"ok": True, "nombre": os.path.basename(out)}
-
-
-def _leer_layouts():
-    try:
-        with open(LAYOUTS_JSON, encoding="utf-8") as f:
-            return json.load(f)
-    except (FileNotFoundError, ValueError):
-        from clipeo import LAYOUTS
-        return LAYOUTS
-
-
-def validar_layouts(datos):
-    """Devuelve el dict limpio o lanza ValueError con el motivo."""
-    if not isinstance(datos, dict):
-        raise ValueError("Formato invalido.")
-    limpio = {}
-    for nombre, lay in datos.items():
-        if not RE_CANAL.match(str(nombre)):
-            raise ValueError(f"Nombre de streamer invalido: {nombre!r}")
-        if not isinstance(lay, dict):
-            raise ValueError(f"{nombre}: formato invalido.")
-        marco = str(lay.get("frame") or "1920x1080")
-        m = re.fullmatch(r"(\d{3,4})x(\d{3,4})", marco)
-        if not m:
-            raise ValueError(f"{nombre}: tamaño de frame inválido ({marco}).")
-        fw, fh = int(m[1]), int(m[2])
-        for k in ("face", "game"):
-            if not RE_RECORTE.match(str(lay.get(k, ""))):
-                raise ValueError(f"{nombre}.{k} debe ser w:h:x:y (ej 300:300:60:430)")
-            w, h, x, y = map(int, str(lay[k]).split(":"))
-            parte = "la cara" if k == "face" else "el juego"
-            if w < 16 or h < 16:
-                raise ValueError(f"{nombre}: el recorte de {parte} es demasiado pequeño.")
-            if x + w > fw or y + h > fh:     # ffmpeg fallaría en cada clip
-                raise ValueError(f"{nombre}: el recorte de {parte} se sale del frame ({fw}x{fh}).")
-        limpio[nombre.lower()] = {"face": lay["face"], "game": lay["game"]}
-        if lay.get("frame"):
-            limpio[nombre.lower()]["frame"] = marco
-        if lay.get("manual"):          # ajustado a mano: la calibración automática no lo pisa
-            limpio[nombre.lower()]["manual"] = True
-    return limpio
 
 
 class Produccion(ClipRef):
@@ -808,265 +771,13 @@ def ver_progreso():
     return progreso.lista()
 
 
-_frames = {}            # (plataforma, canal) -> (hora, png): reusar el frame al ajustar numeros
-FRAME_TTL = 60
-
-
-def _frame_en_vivo(canal, plataforma):
-    """PNG de un frame reciente del directo. Si el cazador graba ese canal, sale de su
-    buffer (sin tocar la red); si no, se pide un frame al directo."""
-    clave = (plataforma, canal)
-    hora, png = _frames.get(clave, (0.0, ""))
-    if png and time.time() - hora < FRAME_TTL and os.path.exists(png):
-        return png
-    png = os.path.join(tempfile.gettempdir(), f"clipeo_frame_{plataforma}_{canal}.png")
-    segs = sorted(glob.glob(os.path.join(BUFFER, f"{plataforma}_{canal}", "seg*.ts")),
-                  key=os.path.getmtime)
-    if len(segs) >= 2 and time.time() - os.path.getmtime(segs[-2]) < 60:
-        fuente = segs[-2]                     # el ultimo puede estar a medio escribir
-    else:
-        from envivo import resolver_url
-        fuente = resolver_url(canal, plataforma)   # RuntimeError si no esta en vivo
-    r = subprocess.run(["ffmpeg", "-nostdin", "-y", "-loglevel", "error", "-i", fuente,
-                        "-frames:v", "1", png], capture_output=True, text=True, timeout=60)
-    if r.returncode != 0 or not os.path.exists(png):
-        raise RuntimeError("No pude sacar un frame del directo: " + r.stderr.strip()[-200:])
-    import cv2
-    import calibrar
-    if calibrar.es_anuncio(cv2.imread(png)):
-        # Twitch puso su pantalla de anuncios: mirar hasta un minuto y quedarse con un frame real.
-        cv2.imwrite(png, calibrar.frames_de(canal, plataforma, n=1)[-1])
-    _frames[clave] = (time.time(), png)
-    return png
-
-
-class AutoCal(BaseModel):
-    canal: str
-    plataforma: Literal["twitch", "kick"] = "twitch"
-
-
-@app.post("/api/auto-calibrar")
-def auto_calibrar(a: AutoCal):
-    """Detecta la cámara del streamer y propone el recorte split. NO lo guarda: la app
-    lo enseña en la vista previa y el usuario confirma con «Guardar recortes»."""
-    import cv2
-    import calibrar
-    if not RE_CANAL.match(a.canal):
-        raise HTTPException(400, "Nombre de canal invalido.")
-    canal = a.canal.lower()
-    try:
-        frames = calibrar.frames_de(canal, a.plataforma)
-        r = calibrar.calibrar_frames(frames)
-    except calibrar.SinCamara as e:
-        raise HTTPException(422, str(e))
-    except (RuntimeError, subprocess.TimeoutExpired) as e:
-        raise HTTPException(404, f"{canal}: {e}")
-    # la previa reutiliza este frame real (sin esperar otra vez a los anuncios)
-    png = os.path.join(tempfile.gettempdir(), f"clipeo_frame_{a.plataforma}_{canal}.png")
-    cv2.imwrite(png, frames[-1])
-    _frames[(a.plataforma, canal)] = (time.time(), png)
-    return r
-
-
-def _frame_guardado(canal, plataforma):
-    """El último frame que se sacó de ese directo (para ajustar el recorte aunque ya no esté en vivo)."""
-    png = os.path.join(tempfile.gettempdir(), f"clipeo_frame_{plataforma}_{canal}.png")
-    return png if os.path.exists(png) else None
-
-
-@app.get("/api/frame")
-def frame(canal: str, plataforma: Literal["twitch", "kick"] = "twitch", fresco: bool = False):
-    """Frame del directo para el editor visual de recortes. Si no está en vivo, el último guardado
-    (cabecera X-Viejo = segundos que tiene). X-Ancho/X-Alto = tamaño real del frame."""
-    from PIL import Image
-    if not RE_CANAL.match(canal):
-        raise HTTPException(400, "Nombre de canal invalido.")
-    canal, cab = canal.lower(), {"Cache-Control": "no-store"}
-    if fresco:
-        _frames.pop((plataforma, canal), None)
-    sin_frame = HTTPException(404, f"{canal} no está en vivo y no tengo ningún frame suyo guardado. "
-                                   "Prueba cuando esté en directo.")
-    try:
-        png = _frame_en_vivo(canal, plataforma)
-    except Exception:             # offline, anuncios, ffmpeg o cv2: se prueba con el último guardado
-        png = _frame_guardado(canal, plataforma)
-        if not png:
-            raise sin_frame
-        cab["X-Viejo"] = str(int(max(0, time.time() - os.path.getmtime(png))))
-    try:
-        with Image.open(png) as im:
-            im.verify()
-        with Image.open(png) as im:
-            cab["X-Ancho"], cab["X-Alto"] = map(str, im.size)
-    except Exception:             # frame a medio escribir
-        raise sin_frame
-    return FileResponse(png, media_type="image/png", headers=cab)
-
-
-@app.get("/api/preview-recorte")
-def preview_recorte(canal: str, face: str, game: str,
-                    plataforma: Literal["twitch", "kick"] = "twitch", fresco: bool = False):
-    """Frame real con los recortes dibujados (rojo = cara, verde = gameplay) y, al lado,
-    como queda el clip split. Para calibrar sin cazar a ciegas."""
-    from PIL import Image
-    from clipeo import cadenas_split
-    if not RE_CANAL.match(canal):
-        raise HTTPException(400, "Nombre de canal invalido.")
-    for nombre, rec in (("cara", face), ("gameplay", game)):
-        if not RE_RECORTE.match(rec):
-            raise HTTPException(400, f"El recorte de {nombre} debe ser ancho:alto:x:y.")
-    canal = canal.lower()
-    if fresco:
-        _frames.pop((plataforma, canal), None)
-    try:
-        png = _frame_en_vivo(canal, plataforma)
-    except (RuntimeError, subprocess.TimeoutExpired) as e:
-        raise HTTPException(404, f"{canal} no esta en vivo o no responde. ({e})")
-    with Image.open(png) as im:
-        ancho, alto = im.size
-    cajas = []
-    for nombre, rec, color in (("cara", face, "red"), ("gameplay", game, "lime")):
-        w, h, x, y = map(int, rec.split(":"))
-        if w < 16 or h < 16 or x + w > ancho or y + h > alto:
-            raise HTTPException(400, f"El recorte de {nombre} ({rec}) se sale del frame "
-                                     f"({ancho}x{alto}).")
-        cajas.append(f"drawbox=x={x}:y={y}:w={w}:h={h}:color={color}:t=6")
-    top, bot = cadenas_split({"face": face, "game": game})
-    fc = (f"[0:v]split=3[a][b][c];[a]{','.join(cajas)},scale=-2:720[full];"
-          f"[b]{top}[top];[c]{bot}[bot];[top][bot]vstack,scale=-2:720[split];"
-          "[full][split]hstack")
-    out = png[:-4] + "_preview.jpg"
-    r = subprocess.run(["ffmpeg", "-nostdin", "-y", "-loglevel", "error", "-i", png,
-                        "-filter_complex", fc, "-frames:v", "1", "-q:v", "3", out],
-                       capture_output=True, text=True)
-    if r.returncode != 0:
-        raise HTTPException(500, "FFmpeg fallo: " + r.stderr.strip()[-300:])
-    return FileResponse(out, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
-
-
-@app.get("/api/layouts")
-def get_layouts():
-    return _leer_layouts()
-
-
-@app.put("/api/layouts")
-def put_layouts(datos: dict):
-    try:
-        limpio = validar_layouts(datos)
-    except ValueError as e:
-        raise HTTPException(400, str(e))
-    from clipeo import escribir_json
-    try:
-        escribir_json(LAYOUTS_JSON, limpio)    # atómica y con reintentos (el cazador puede estar leyéndolo)
-    except OSError as e:
-        raise HTTPException(503, f"No pude guardar los recortes (el archivo está ocupado): {e}")
-    return {"ok": True, "nota": "Se aplica al siguiente clip, tambien si el cazador esta en marcha."}
-
-
-# ---------- Revisión del piloto de Hypazo (pestaña Revisar) ----------
-# Solo guarda decisiones y resúmenes en salida/_revision y salida/_resumenes: nunca mueve ni borra clips.
-RE_SESION = re.compile(r"^[0-9a-f]{8}$")
-ACCIONES = ("etiqueta", "decidir", "deshacer_pareja", "rehacer_pareja", "escapado_añadir", "escapado_quitar")
-
-
-class AccionRevision(BaseModel):
-    accion: Literal[ACCIONES]
-    clip: str | None = Field(None, max_length=200)
-    valor: str | None = Field(None, max_length=20)
-    t_s: int | None = Field(None, ge=0, le=7 * 24 * 3600)
-    tipo: str | None = Field(None, max_length=20)
-    i: int | None = Field(None, ge=0)
-
-
-def _sesion(sid):
-    """Datos de una sesión; 404 ante cualquier id raro (nada de rutas)."""
-    if not RE_SESION.match(sid):
-        raise HTTPException(404, "Esa sesión no existe.")
-    try:
-        return Sesiones(SALIDA).datos(sid)
-    except (OSError, ValueError):
-        raise HTTPException(404, "Esa sesión no existe.")
-
-
-def _duracion(d):
-    return hms(d["fin"] - d["inicio"]) if d.get("inicio") is not None and d.get("fin") is not None else None
-
-
-@app.get("/api/revision/sesiones")
-def revision_sesiones():
-    return [{"id": d["id"], "canal": d["canal"], "plataforma": d["plataforma"],
-             "duracion": _duracion(d), "n_clips": len(clips_de(SALIDA, d["id"]))}
-            for d in Sesiones(SALIDA).lista()]
-
-
-@app.get("/api/revision/sesion/{sid}")
-def revision_sesion(sid: str):
-    d = _sesion(sid)
-    rev, clips = Revision(SALIDA, sid), clips_de(SALIDA, sid)
-    estado = rev.estado()
-    descartados = {c.id for c in clips if rev.decision(c.id, c.origen) == "descartar"}
-    parejas = emparejar(clips, set(estado["deshechos"]), descartados)
-    vistos = []
-    for c in clips:
-        ruta_clip(c.carpeta, c.nombre + ".mp4")          # valida: solo clips de la galería
-        vistos.append({"id": c.id, "url": f"/salida/{urllib.parse.quote(c.carpeta)}/{urllib.parse.quote(c.nombre)}.mp4",
-                       "tiempo": hms(c.tiempo), "t": c.tiempo, "ventana": c.ventana, "origen": c.origen,
-                       "decision": rev.decision(c.id, c.origen)})
-    return {"sesion": {"canal": d["canal"], "plataforma": d["plataforma"], "inicio": d["estado_inicio"],
-                       "duracion": _duracion(d),
-                       "cortes": [{"en": hms(k["en"]), "dura_s": int(round(k["dura"]))} for k in d["cortes"]]},
-            "clips": vistos, "parejas": {m: {"con": a, "solape": s} for m, (a, s) in parejas.items()},
-            "estado": estado, "aviso": rev.aviso}
-
-
-@app.post("/api/revision/sesion/{sid}")
-def revision_cambiar(sid: str, a: AccionRevision):
-    _sesion(sid)
-    rev = Revision(SALIDA, sid)
-    origenes = {c.id: c.origen for c in clips_de(SALIDA, sid)}
-    if a.accion not in ("escapado_añadir", "escapado_quitar") and a.clip not in origenes:
-        raise HTTPException(400, "Ese clip no es de esta sesión.")
-    try:
-        if a.accion == "etiqueta":
-            rev.etiqueta(a.clip, a.valor)
-        elif a.accion == "decidir":
-            rev.decidir(a.clip, a.valor or "", origen=origenes[a.clip])
-        elif a.accion == "deshacer_pareja":
-            rev.deshacer_pareja(a.clip)
-        elif a.accion == "rehacer_pareja":
-            rev.rehacer_pareja(a.clip)
-        elif a.accion == "escapado_añadir":
-            rev.escapado_añadir(a.t_s if a.t_s is not None else -1, a.tipo or "")
-        else:
-            rev.escapado_quitar(a.i if a.i is not None else -1)
-    except ValueError as e:
-        raise HTTPException(400, str(e))
-    return {"ok": True}
-
-
-def _resumen(sid):
-    d = _sesion(sid)
-    r = construir(d, clips_de(SALIDA, sid), Revision(SALIDA, sid).estado())
-    validar(r)
-    return r
-
-
-@app.get("/api/revision/resumen/{sid}")
-def revision_resumen(sid: str):
-    r = _resumen(sid)
-    return {"legible": texto_legible(r), "exacto": texto_exacto(r)}
-
-
-@app.post("/api/revision/resumen/{sid}/guardar")
-def revision_guardar(sid: str):
-    """Solo se llama cuando el usuario confirma en la vista previa. No se envía a ningún sitio."""
-    return {"guardado": guardar(_resumen(sid), SALIDA)}
-
-
 @app.get("/", response_class=HTMLResponse)
 def index():
     with open(os.path.join(AQUI, "app.html"), encoding="utf-8") as f:
-        return f.read()
+        html = f.read()
+    # ?v=<fecha del archivo>: tras actualizar, la ventana no se queda con el CSS/JS viejo en caché
+    return re.sub(r'(/assets/[\w.-]+\.(?:css|js))"',
+                  lambda m: f'{m[1]}?v={int(os.path.getmtime(os.path.join(AQUI, m[1][1:])))}"', html)
 
 
 abrir_mini = None    # la pone hypazo.py al abrir la ventana de escritorio

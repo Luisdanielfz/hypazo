@@ -15,7 +15,7 @@ EMAIL = "147686231+Luisdanielfz@users.noreply.github.com"
 LISTA_BLANCA = [
     "app.py", "app.html", "audio.py", "autoclip.py", "calibrar.py", "clipeo.py", "codigos.py", "credito.py",
     "envivo.py", "kick.py", "produccion.py", "resumen.py", "revision.py", "sesion.py", "vod.py", "hypazo.py",
-    "sin_consola.py", "cola_render.py", "clips_vivos.py", "ia.py", "textos_clip.py", "api_asistente.py", "agente.py", "bandeja.py", "progreso.py", "serie_chat.py", "mini.html",
+    "sin_consola.py", "cola_render.py", "clips_vivos.py", "ia.py", "textos_clip.py", "api_asistente.py", "api_recortes.py", "api_revision.py", "agente.py", "bandeja.py", "progreso.py", "serie_chat.py", "mini.html",
     "test_app.py", "layouts.json", "requirements.txt", "VERSION", "Clipeo.bat", "install.ps1", "README.md",
     "assets", "tests/piloto", "installer", ".github", "tools/exportar_publico.py",
 ]

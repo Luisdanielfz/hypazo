@@ -55,13 +55,34 @@ def elegir_codificador(ejecutar=subprocess.run):
     return "libx264"
 
 
-def args_video():
+def _args(codificador, bitrate):
+    extra = ["-preset", "veryfast"] if codificador == "libx264" else []
+    return ["-c:v", codificador, *extra, "-b:v", bitrate]
+
+
+def args_video(bitrate="4000k"):
     """Codificador para los clips (se averigua una vez por proceso)."""
     global _codificador
     if _codificador is None:
         _codificador = elegir_codificador()
-    extra = ["-preset", "veryfast"] if _codificador == "libx264" else []
-    return ["-c:v", _codificador, *extra, "-b:v", "4000k"]
+    return _args(_codificador, bitrate)
+
+
+def con_respaldo(correr, bitrate="4000k"):
+    """correr(args_video) con el codificador por hardware; si ffmpeg falla con él, repite con libx264."""
+    args = args_video(bitrate)
+    if args[1] == "libx264":
+        return correr(args)
+    try:
+        return correr(args)
+    except subprocess.CalledProcessError:
+        return correr(_args("libx264", bitrate))
+
+
+def _render(cmd):
+    """ffmpeg con el codificador elegido en el hueco "VIDEO" (y libx264 si el de hardware falla)."""
+    i = cmd.index("VIDEO")
+    con_respaldo(lambda video: subprocess.run(cmd[:i] + video + cmd[i + 1:], check=True))
 
 
 def convertir(entrada, salida, credito):
@@ -70,10 +91,9 @@ def convertir(entrada, salida, credito):
         "-fflags", "+discardcorrupt", "-max_error_rate", "1.0", "-i", entrada,
         "-filter_complex", filtro_vertical(credito),
         "-map", "[out]", "-map", "0:a?",
-        "-r", "30", *args_video(),
-        "-c:a", "aac", "-b:a", "128k", salida,
+        "-r", "30", "VIDEO", "-c:a", "aac", "-b:a", "128k", salida,
     ]
-    subprocess.run(cmd, check=True)
+    _render(cmd)
 
 
 # Recortes "cara/avatar" y "gameplay" por streamer, en formato  w:h:x:y  sobre
@@ -166,10 +186,9 @@ def convertir_split(entrada, salida, chatfile="", credito="", layout=None):
         "-fflags", "+discardcorrupt", "-max_error_rate", "1.0", "-i", entrada,
         "-filter_complex", fc,
         "-map", "[out]", "-map", "0:a?",
-        "-r", "30", *args_video(),
-        "-c:a", "aac", "-b:a", "128k", salida,
+        "-r", "30", "VIDEO", "-c:a", "aac", "-b:a", "128k", salida,
     ]
-    subprocess.run(cmd, check=True)
+    _render(cmd)
 
 
 _ASS_CABECERA = """[Script Info]

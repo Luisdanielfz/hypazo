@@ -28,6 +28,8 @@ import subprocess
 import tempfile
 import threading
 
+import clipeo
+
 MODELO = "small"        # base = mas rapido / peor; small va bien en español en CPU
 PALABRAS_POR_GRUPO = 3
 PAUSA_CORTE = 0.6       # silencio (s) que fuerza grupo nuevo
@@ -232,10 +234,10 @@ def producir(src, titulo="", subtitulos=True, estilo="amarillo", marca=None, out
         tmp_mp4 = os.path.join(tmpdir, "prod.mp4")
         aviso("Montando el vídeo", 0)
         # cwd=tmpdir y nombre relativo: evita escapar 'C:' dentro del filtro ass=
-        _ffmpeg_con_progreso(["ffmpeg", "-nostdin", "-y", "-loglevel", "error",
-                              "-i", os.path.abspath(src), "-vf", "ass=prod.ass", "-r", "30",
-                              "-c:v", "libx264", "-preset", "veryfast", "-b:v", "5000k",
-                              "-c:a", "aac", "-b:a", "128k", "prod.mp4"], tmpdir, duracion, aviso)
+        clipeo.con_respaldo(lambda video: _ffmpeg_con_progreso(
+            ["ffmpeg", "-nostdin", "-y", "-loglevel", "error", "-i", os.path.abspath(src),
+             "-vf", "ass=prod.ass", "-r", "30", *video, "-c:a", "aac", "-b:a", "128k", "prod.mp4"],
+            tmpdir, duracion, aviso), "5000k")
         if os.path.exists(out):     # re-producir: en Windows move no pisa un archivo
             os.remove(out)
         shutil.move(tmp_mp4, out)   # aparece entero o no aparece
