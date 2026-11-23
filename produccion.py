@@ -26,6 +26,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import threading
 
 MODELO = "small"        # base = mas rapido / peor; small va bien en español en CPU
 PALABRAS_POR_GRUPO = 3
@@ -180,23 +181,61 @@ def ruta_para_subir(src, titulo, carpeta_destino):
     return nuevo, viejos
 
 
-def producir(src, titulo="", subtitulos=True, estilo="amarillo", marca=None, out=None):
+def pct_ffmpeg(linea: str, duracion: float):
+    """% hecho a partir de una línea de `ffmpeg -progress` (out_time_us / out_time_ms, ambas en µs)."""
+    clave, _, valor = linea.strip().partition("=")
+    if clave not in ("out_time_us", "out_time_ms") or not duracion:
+        return None
+    try:
+        return max(0, min(99, int(int(valor) / 1e6 / duracion * 100)))
+    except ValueError:
+        return None
+
+
+def _ffmpeg_con_progreso(cmd, cwd, duracion, aviso):
+    """Como subprocess.run(check=True) pero contando el avance; mismo CalledProcessError si falla."""
+    proc = subprocess.Popen(cmd[:1] + ["-progress", "pipe:1", "-nostats"] + cmd[1:], cwd=cwd, text=True,
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, encoding="utf-8", errors="replace")
+    err = []
+    hilo = threading.Thread(target=lambda: err.extend(proc.stderr), daemon=True)   # que stderr no tape la tubería
+    hilo.start()
+    try:
+        for linea in proc.stdout:
+            pct = pct_ffmpeg(linea, duracion)
+            if pct is not None:
+                aviso("Montando el vídeo", pct)
+    except BaseException:          # si falla el aviso, que ffmpeg no se quede vivo bloqueando la carpeta temporal
+        proc.kill()
+        proc.wait()
+        raise
+    proc.wait()
+    hilo.join(5)
+    if proc.returncode:
+        raise subprocess.CalledProcessError(proc.returncode, cmd, stderr="".join(err))
+
+
+def producir(src, titulo="", subtitulos=True, estilo="amarillo", marca=None, out=None, aviso=None):
     """Crea el clip para TikTok en `out` (por defecto <src>_tiktok.mp4).
-    Devuelve (ruta, n_palabras)."""
+    aviso(paso, pct=None), si se da, recibe en qué paso va. Devuelve (ruta, n_palabras)."""
+    aviso = aviso or (lambda paso, pct=None: None)
     out = out or src[:-4] + "_tiktok.mp4"
+    if subtitulos:
+        aviso("Transcribiendo lo que se dice")
     palabras = transcribir(src) if subtitulos else []
     tmpdir = tempfile.mkdtemp(prefix="clipeo_")
     try:
+        aviso("Poniendo título y subtítulos")
         ass = os.path.join(tmpdir, "prod.ass")
-        escribir_ass(palabras, titulo, _duracion(src), ass, estilo,
+        duracion = _duracion(src)
+        escribir_ass(palabras, titulo, duracion, ass, estilo,
                      cargar_marca() if marca is None else marca)
         tmp_mp4 = os.path.join(tmpdir, "prod.mp4")
+        aviso("Montando el vídeo", 0)
         # cwd=tmpdir y nombre relativo: evita escapar 'C:' dentro del filtro ass=
-        subprocess.run(["ffmpeg", "-nostdin", "-y", "-loglevel", "error",
-                        "-i", os.path.abspath(src), "-vf", "ass=prod.ass", "-r", "30",
-                        "-c:v", "libx264", "-preset", "veryfast", "-b:v", "5000k",
-                        "-c:a", "aac", "-b:a", "128k", "prod.mp4"],
-                       cwd=tmpdir, check=True, capture_output=True, text=True)
+        _ffmpeg_con_progreso(["ffmpeg", "-nostdin", "-y", "-loglevel", "error",
+                              "-i", os.path.abspath(src), "-vf", "ass=prod.ass", "-r", "30",
+                              "-c:v", "libx264", "-preset", "veryfast", "-b:v", "5000k",
+                              "-c:a", "aac", "-b:a", "128k", "prod.mp4"], tmpdir, duracion, aviso)
         if os.path.exists(out):     # re-producir: en Windows move no pisa un archivo
             os.remove(out)
         shutil.move(tmp_mp4, out)   # aparece entero o no aparece

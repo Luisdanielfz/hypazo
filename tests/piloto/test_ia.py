@@ -181,3 +181,14 @@ def test_gemini_retirado_para_usuarios_nuevos_tambien_se_cambia():
     r = ia.chat(c, [{"role": "user", "content": "hola"}], cliente=httpx.Client(transport=httpx.MockTransport(manejar)))
     assert r["modelo"] == "gemini-flash-latest"
     ia._reemplazos.clear()
+
+
+def test_los_que_descansan_se_prueban_al_final_si_los_demas_fallan():
+    ia._descanso.clear()
+    ia._descanso["gemini"] = 10 ** 12
+    vistos = []
+    c = cfg(groq={"clave": "a", "modelo": "", "activo": True}, gemini={"clave": "b", "modelo": "", "activo": True})
+    r = ia.chat(c, [{"role": "user", "content": "1"}],
+                cliente=cliente({"api.groq.com": (500, "caído"), "generativelanguage.googleapis.com": ok("ok")}, vistos))
+    assert r["proveedor"] == "gemini" and [h for h, _, _ in vistos] == ["api.groq.com", "generativelanguage.googleapis.com"]
+    ia._descanso.clear()

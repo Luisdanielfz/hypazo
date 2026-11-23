@@ -91,12 +91,33 @@ def ventana(url: str, navegador=webbrowser.open) -> None:
         import webview
         w = webview.create_window("Hypazo", url, width=1280, height=860, min_size=(900, 600))
         bandeja = _bandeja(w)
+        app = sys.modules.get("app")
+        if app is not None:
+            app.abrir_mini = _abridor_mini(webview, url)
         webview.start()
     except Exception:              # pywebview ausente o WebView2 no disponible: que la app siga usable
         navegador(url)
     finally:
         if bandeja:
             bandeja.quitar()
+
+
+def _abridor_mini(webview, url: str):
+    """Función que abre la mini ventana (siempre encima) o la trae al frente si ya está abierta."""
+    abierta, lock = {}, threading.Lock()
+
+    def abrir():
+        with lock:                  # dos clics seguidos no abren dos mini ventanas
+            v = abierta.get("v")
+            if v is not None:
+                v.show()
+                v.restore()
+                return
+            v = webview.create_window("Hypazo mini", url.rstrip("/") + "/mini", width=360, height=210,
+                                      on_top=True, resizable=False)
+            v.events.closed += lambda: abierta.pop("v", None)
+            abierta["v"] = v
+    return abrir
 
 
 def _bandeja(w):

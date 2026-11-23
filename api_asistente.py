@@ -237,21 +237,57 @@ ACCIONES = {
     "producir_clip": _producir,
     "generar_textos": lambda a: _app().clip_textos(_app().Textos(carpeta=str(a.get("carpeta", "")),
                                                                   nombre=str(a.get("nombre", "")))),
+    "marcar_clip": lambda a: _marcar(a),
+    "marcar_subido": lambda a: _app().clip_mover(_app().Mover(carpeta="PARA SUBIR", nombre=str(a.get("nombre", "")),
+                                                              destino="SUBIDOS")),
+    "analizar_vod": lambda a: _app().vod(_app().Vod(url=str(a.get("url", ""))[:200], n=a.get("n") or 10)),
+    "clip_ya": lambda a: _app().clip_ya(),
+    "pausar_caza": lambda a: _app().pausa(),
+    "reanudar_caza": lambda a: _app().reanudar(),
 }
+
+
+def _marcar(a):
+    m = _app()
+    if a.get("estado", "") not in m.ESTADOS:
+        raise HTTPException(400, "Estado de clip inválido: bueno, descartado o vacío.")
+    return m.clip_estado(m.Estado(carpeta=str(a.get("carpeta", "")), nombre=str(a.get("nombre", "")),
+                                  estado=a.get("estado", "")))
+
+
+def validar_propuesta(nombre: str, a: dict) -> str | None:
+    """Error si la acción no se va a poder hacer (clip que no existe, enlace malo); None si vale.
+    Así la IA corrige su propuesta antes de que llegue al usuario."""
+    m = _app()
+    try:
+        if nombre in ("producir_clip", "generar_textos", "marcar_clip"):
+            m.ruta_clip(str(a.get("carpeta", "")), str(a.get("nombre", "")))
+        elif nombre == "marcar_subido":
+            m.ruta_clip(m.PARA_SUBIR, str(a.get("nombre", "")))
+        elif nombre == "analizar_vod" and not m.RE_VOD.match(str(a.get("url", "")).strip()):
+            return "Ese enlace no es un VOD de Twitch (https://www.twitch.tv/videos/NUMERO)."
+        elif nombre in ("clip_ya", "pausar_caza", "reanudar_caza", "parar_caza") and not m._corriendo():
+            return "El cazador no está en marcha: no hay nada que parar, pausar o recortar."
+        elif nombre in ("empezar_caza", "analizar_vod") and m._corriendo():
+            return "Ya hay una caza o un VOD en marcha: párala primero (parar_caza)."
+    except HTTPException as e:
+        return f"{e.detail} ({a.get('carpeta', m.PARA_SUBIR if nombre == 'marcar_subido' else '')}/{a.get('nombre', '')})"
+    return None
 
 
 @router.post("/api/ia/agente")
 def agente_responder(c: Chat):
     try:
         r = agente.responder(_cfg().get("ia", {}), [_para_ia(m) for m in c.mensajes[-40:]], LECTURAS, ACCIONES,
-                             c.proveedor or None, c.modelo or None)
+                             c.proveedor or None, c.modelo or None, validar=validar_propuesta)
     except ia.ErrorIA as e:
         raise HTTPException(502, str(e))
     return {**r, "proveedor": ia.PROVEEDORES.get(r["proveedor"], {}).get("nombre", r["proveedor"])}
 
 
 class Accion(BaseModel):
-    herramienta: Literal["empezar_caza", "parar_caza", "producir_clip", "generar_textos"]
+    herramienta: Literal["empezar_caza", "parar_caza", "producir_clip", "generar_textos", "marcar_clip",
+                         "marcar_subido", "analizar_vod", "clip_ya", "pausar_caza", "reanudar_caza"]
     args: dict = Field(default_factory=dict)
 
 

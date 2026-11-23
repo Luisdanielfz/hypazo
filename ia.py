@@ -158,7 +158,8 @@ def _candidatos(cfg, proveedor, modelo):
     lista = [{**d, "modelo": _reemplazos.get((d["id"], d["modelo"]), d["modelo"])} for d in lista]
     ahora = time.time()
     libres = [d for d in lista if _descanso.get(d["id"], 0) <= ahora]
-    return libres or lista              # si todos descansan, mejor intentarlo que no contestar
+    # los que descansan, al final: si fallan todos los demás, mejor intentarlo que no contestar
+    return libres + [d for d in lista if d not in libres]
 
 
 def _descansar(d, r):

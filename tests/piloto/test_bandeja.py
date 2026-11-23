@@ -79,3 +79,30 @@ def test_sin_app_cargada_no_hay_bandeja(monkeypatch):
     import hypazo
     monkeypatch.delitem(sys.modules, "app", raising=False)
     assert hypazo._bandeja(object()) is None
+
+
+def test_mini_ventana_se_crea_una_vez_y_se_reabre():
+    import hypazo
+    creadas = []
+
+    class V:
+        def __init__(self):
+            self.mostrada, self.events = 0, types.SimpleNamespace(closed=Evento())
+
+        def show(self):
+            self.mostrada += 1
+
+        def restore(self):
+            pass
+
+    class Evento(list):
+        def __iadd__(self, f):
+            self.append(f)
+            return self
+
+    import types
+    wv = types.SimpleNamespace(create_window=lambda titulo, url, **kw: creadas.append((url, kw)) or V())
+    abrir = hypazo._abridor_mini(wv, "http://127.0.0.1:8765/")
+    abrir()
+    abrir()
+    assert len(creadas) == 1 and creadas[0][0] == "http://127.0.0.1:8765/mini" and creadas[0][1]["on_top"] is True

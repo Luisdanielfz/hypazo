@@ -242,6 +242,14 @@ class Atraso:
         return self.desde is None
 
 
+MEDIDA_S = 2    # cada cuánto se manda a la app una medida para su gráfica en vivo
+
+
+def linea_medida(puntaje, base, piso, factor):
+    """Lo que lee la gráfica de Cazar: puntaje ahora, lo normal y desde dónde dispara."""
+    return f"[medida] {puntaje} {base:.1f} {max(piso, base * factor):.1f}"
+
+
 LATIDO_S = 30   # cada cuánto se apunta en la sesión que el cazador sigue vivo
 
 
@@ -407,7 +415,7 @@ def main():
     muestras = collections.deque(maxlen=BASE_SEG)
     ultimo_clip = 0.0
     ultima_muestra = time.time()
-    ultimo_reporte = time.time()
+    ultimo_reporte = ultima_medida = time.time()
     max_chat = max_gente = 0
     max_ratio = max_grito = 0.0
     indice = siguiente_indice(carpeta)
@@ -446,6 +454,9 @@ def main():
             max_ratio = max(max_ratio, puntaje / max(base, 1.0))
             max_gente = max(max_gente, unicos)
             max_grito = max(max_grito, grito)
+            if now - ultima_medida >= MEDIDA_S:
+                print(linea_medida(puntaje, base, a.piso, a.factor))
+                ultima_medida = now
             if now - ultimo_reporte >= 30:   # para afinar umbrales mirando el registro
                 voz = (f" | audio normal {vol.base:.0f} dB, grito max +{max_grito:.0f} dB"
                        f" (dispara a +{a.audio:.0f})") if vol.base is not None else ""

@@ -25,6 +25,8 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from clips_vivos import ClipsVivos
+import progreso
+from serie_chat import SerieChat
 from credito import credito_final
 import sin_consola
 sin_consola.activar()   # ffmpeg/yt-dlp sin ventanas de terminal
@@ -59,6 +61,7 @@ _lock = threading.Lock()
 _estado = {"proc": None, "canal": "", "inicio": 0.0, "pausado": False}
 _log = collections.deque(maxlen=300)
 _vivos = ClipsVivos(SALIDA)
+_serie = SerieChat()
 
 
 def avisador(titulo, texto):
@@ -92,6 +95,8 @@ class Arranque(BaseModel):
 
 def _leer_salida(proc):
     for linea in proc.stdout:
+        if _serie.leer(linea, time.time()):      # medida para la gráfica: no ensucia el registro
+            continue
         _log.append(linea.rstrip("\r\n"))
         _avisar_clip(_vivos.leer(linea))
     _log.append(f"[proceso terminado, codigo {proc.wait()}]")
@@ -118,6 +123,7 @@ def start(a: Arranque):
             cmd.append("--split")
         _log.clear()
         _vivos.limpiar()
+        _serie.limpiar()
         _log.append("$ " + " ".join(cmd[2:]))
         env = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUNBUFFERED="1")
         # stdin=PIPE: por ahi le llega el "clip ya" (autoclip lo lee como un ENTER).
@@ -165,6 +171,7 @@ def vod(v: Vod):
             cmd.append("--split")
         _log.clear()
         _vivos.limpiar()
+        _serie.limpiar()
         _log.append("$ " + " ".join(cmd[2:]))
         env = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUNBUFFERED="1")
         proc = subprocess.Popen(cmd, cwd=AQUI, env=env, stdin=subprocess.DEVNULL,
@@ -306,7 +313,8 @@ def clip_ya():
 @app.get("/api/status")
 def status():
     return {"corriendo": _corriendo(), "canal": _estado["canal"], "pausado": _estado["pausado"],
-            "inicio": _estado["inicio"], "log": list(_log)[-120:], "vivos": _vivos.lista()}
+            "inicio": _estado["inicio"], "log": list(_log)[-120:], "vivos": _vivos.lista(),
+            "serie": _serie.datos()}
 
 
 PAPELERA = "_papelera"   # carpetas con '_' no salen en la galeria
@@ -645,11 +653,13 @@ def clip_producir(p: Produccion):
     destino, viejos = ruta_para_subir(src, p.titulo, os.path.join(SALIDA, PARA_SUBIR))
     if not _lock_prod.acquire(blocking=False):
         raise HTTPException(409, "Ya hay un clip produciendose. Espera a que termine.")
+    clave = f"{p.carpeta}/{p.nombre}"
     try:
-        out, n = producir(src, p.titulo, p.subtitulos, p.estilo, out=destino)
+        out, n = producir(src, p.titulo, p.subtitulos, p.estilo, out=destino, aviso=progreso.avisador(clave))
     except subprocess.CalledProcessError as e:
         raise HTTPException(500, "FFmpeg fallo: " + (e.stderr or "")[-300:])
     finally:
+        progreso.quitar(clave)
         _lock_prod.release()
     for v in viejos:    # solo tras exito: si falla, la version anterior sigue ahi
         if os.path.abspath(v) != os.path.abspath(out):
@@ -679,6 +689,32 @@ def clip_mover(m: Mover):
     if os.path.exists(src[:-4] + ".json"):
         os.replace(src[:-4] + ".json", dst[:-4] + ".json")
     return {"ok": True}
+
+
+REDES = ("tiktok", "shorts", "reels")
+_lock_redes = threading.Lock()
+
+
+class Red(ClipRef):
+    red: Literal["tiktok", "shorts", "reels"]
+    hecho: bool
+
+
+@app.post("/api/clip/redes")
+def clip_redes(r: Red):
+    """Marca en qué redes está subido un clip de PARA SUBIR; con las tres, pasa solo a SUBIDOS."""
+    if r.carpeta != PARA_SUBIR:
+        raise HTTPException(400, "Solo los clips de PARA SUBIR llevan la lista de redes.")
+    with _lock_redes:          # tres clics seguidos: leer-cambiar-guardar uno detrás de otro
+        mp4 = ruta_clip(r.carpeta, r.nombre)
+        meta = _meta(mp4)
+        hechas = set(meta.get("subido_en") or []) & set(REDES)
+        hechas = hechas | {r.red} if r.hecho else hechas - {r.red}
+        _guardar_meta(mp4, {**meta, "subido_en": sorted(hechas)})
+        movido = hechas == set(REDES)
+        if movido:
+            clip_mover(Mover(carpeta=PARA_SUBIR, nombre=r.nombre, destino=SUBIDOS))
+    return {"subido_en": sorted(hechas), "movido": movido}
 
 
 class Carpeta(BaseModel):
@@ -720,6 +756,9 @@ def _transcripcion(mp4, meta):
     return texto
 
 
+PASOS_TEXTOS = ("Transcribiendo lo que se dice", "Pidiendo títulos a la IA", "Preparando textos")
+
+
 @app.post("/api/clip/textos")
 def clip_textos(t: Textos):
     """Títulos, hashtags y textos para TikTok / Shorts / Reels (con IA si hay proveedor)."""
@@ -734,10 +773,24 @@ def clip_textos(t: Textos):
             meta = {**meta, "canal": m[2], "plataforma": "kick" if m[1] else "twitch"}
     cfg_ia = hypazo.config().get("ia", {})
     hay_ia = bool(ia.disponibles(cfg_ia))
-    texto = _transcripcion(mp4, meta) if (hay_ia and t.transcribir) else ""
-    res = textos_clip.generar(meta, cfg_ia, texto) if hay_ia else textos_clip.basico(meta)
+    clave = f"{t.carpeta}/{t.nombre}"
+    try:
+        if hay_ia and t.transcribir:
+            progreso.poner(clave, "Transcribiendo lo que se dice")
+        texto = _transcripcion(mp4, meta) if (hay_ia and t.transcribir) else ""
+        progreso.poner(clave, "Pidiendo títulos a la IA" if hay_ia else "Preparando textos")
+        res = textos_clip.generar(meta, cfg_ia, texto) if hay_ia else textos_clip.basico(meta)
+    finally:
+        if progreso.lista().get(clave, {}).get("paso") in PASOS_TEXTOS:   # no borrar el de una producción
+            progreso.quitar(clave)
     _guardar_meta(mp4, {**_meta(mp4), "textos": res})
     return res
+
+
+@app.get("/api/progreso")
+def ver_progreso():
+    """Tareas largas en curso (producir, textos) y en qué paso van."""
+    return progreso.lista()
 
 
 _frames = {}            # (plataforma, canal) -> (hora, png): reusar el frame al ajustar numeros
@@ -962,6 +1015,24 @@ def revision_guardar(sid: str):
 @app.get("/", response_class=HTMLResponse)
 def index():
     with open(os.path.join(AQUI, "app.html"), encoding="utf-8") as f:
+        return f.read()
+
+
+abrir_mini = None    # la pone hypazo.py al abrir la ventana de escritorio
+
+
+@app.post("/api/mini")
+def mini():
+    """Mini ventana siempre encima mientras se caza (solo en la app de escritorio)."""
+    if abrir_mini is None:
+        raise HTTPException(409, "La mini ventana solo está en la app de escritorio.")
+    abrir_mini()
+    return {"ok": True}
+
+
+@app.get("/mini", response_class=HTMLResponse)
+def pagina_mini():
+    with open(os.path.join(AQUI, "mini.html"), encoding="utf-8") as f:
         return f.read()
 
 

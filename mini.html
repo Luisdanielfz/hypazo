@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hypazo mini</title>
+<style>
+  :root { --bg: #04050b; --ink: #edf1ff; --muted: #a2abc4; --dim: #7c86a3; --cyan: #3fe9ff; --cyan-ink: #02141a;
+          --magenta: #ff4fd8; --edge: rgba(255,255,255,.09); --bad: #ff6b81;
+          --body: "Segoe UI", system-ui, sans-serif; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 14px 16px; background: var(--bg); color: var(--ink); font: 13.5px/1.4 var(--body);
+         user-select: none; overflow: hidden; }
+  .fila { display: flex; align-items: center; gap: 10px; }
+  .punto { width: 10px; height: 10px; border-radius: 50%; background: var(--dim); flex: none; }
+  .on .punto { background: var(--cyan); box-shadow: 0 0 10px var(--cyan); animation: latido 1.6s infinite; }
+  .pausa .punto { background: #ffd166; box-shadow: none; animation: none; }
+  @keyframes latido { 50% { opacity: .45; } }
+  #estado { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #n { margin-left: auto; color: var(--muted); white-space: nowrap; }
+  #ultimo { margin: 8px 0 12px; color: var(--muted); font-size: 12.5px; min-height: 18px; overflow: hidden;
+            text-overflow: ellipsis; white-space: nowrap; }
+  .botones { display: flex; gap: 8px; }
+  button { flex: 1; height: 38px; border: 1px solid var(--edge); border-radius: 10px; background: rgba(255,255,255,.05);
+           color: var(--ink); font: 600 13px var(--body); cursor: pointer; }
+  button:hover:not(:disabled) { background: rgba(255,255,255,.1); }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  #ya { background: var(--cyan); border-color: var(--cyan); color: var(--cyan-ink); }
+  #err { color: var(--bad); font-size: 12px; min-height: 16px; margin-top: 6px; }
+  @media (prefers-reduced-motion: reduce) { .on .punto { animation: none; } }
+</style>
+</head>
+<body>
+<div class="fila" id="cab"><span class="punto"></span><span id="estado">Conectando…</span><span id="n"></span></div>
+<div id="ultimo" aria-live="polite"></div>
+<div class="botones">
+  <button id="ya" type="button" title="Clip ahora mismo (F9)">Clip ya</button>
+  <button id="pausa" type="button" title="Pausar o reanudar la caza automática (F8)">Pausar</button>
+</div>
+<div id="err" role="alert"></div>
+<script>
+const $ = id => document.getElementById(id);
+const ESTADO = { cola: "en cola", renderizando: "renderizando…", listo: "listo", fallo: "descartado" };
+let pausado = false;
+async function api(url, opts) {
+  const r = await fetch(url, opts);
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(typeof j.detail === "string" ? j.detail : "Error " + r.status);
+  return j;
+}
+async function refrescar() {
+  try {
+    const s = await api("/api/status");
+    const vod = s.corriendo && s.canal.startsWith("VOD ");
+    pausado = !!s.pausado;
+    $("cab").className = "fila" + (s.corriendo ? (pausado ? " pausa" : " on") : "");
+    $("estado").textContent = !s.corriendo ? "Parado" : (vod ? "Analizando " : pausado ? "En pausa · " : "Cazando · ") + s.canal;
+    const n = s.log.filter(l => l.includes("CLIP GUARDADO")).length;
+    $("n").textContent = s.corriendo ? n + (n === 1 ? " clip" : " clips") : "";
+    const u = s.vivos[0];
+    $("ultimo").textContent = u ? `Último: clip ${u.n} ${ESTADO[u.estado] || u.estado}` : (s.corriendo ? "Aún sin clips" : "Arranca la caza en la ventana principal");
+    $("ya").disabled = $("pausa").disabled = !s.corriendo || vod;
+    $("pausa").textContent = pausado ? "Reanudar" : "Pausar";
+  } catch (e) { $("estado").textContent = "Sin conexión con Hypazo"; }
+}
+async function hacer(url) {
+  $("err").textContent = "";
+  try { await api(url, { method: "POST" }); } catch (e) { $("err").textContent = e.message; }
+  refrescar();
+}
+$("ya").onclick = () => hacer("/api/clip-ya");
+$("pausa").onclick = () => hacer(pausado ? "/api/reanudar" : "/api/pausa");
+refrescar();
+setInterval(refrescar, 2000);
+</script>
+</body>
+</html>

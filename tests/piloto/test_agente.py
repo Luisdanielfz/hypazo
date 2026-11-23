@@ -151,3 +151,66 @@ def test_sin_herramientas_avisa_de_que_no_miro_nada():
         return {"texto": "Hola", "proveedor": "x", "modelo": "m", "llamadas": []}
     r = agente.responder({}, [{"role": "user", "content": "busca"}], {}, {}, llamar=llamar)
     assert r["texto"].startswith("Hola") and "herramientas" in r["texto"]
+
+
+def test_resumen_de_las_acciones_nuevas():
+    r = agente.resumen_accion
+    assert r("marcar_clip", {"carpeta": "c", "nombre": "n.mp4", "estado": "descartado"}) == "Marcar n.mp4 (c) como descartado"
+    assert r("marcar_clip", {"carpeta": "c", "nombre": "n.mp4", "estado": ""}) == "Quitar la marca de n.mp4 (c)"
+    assert r("marcar_subido", {"nombre": "Golazo.mp4"}) == "Pasar Golazo.mp4 a SUBIDOS"
+    assert r("analizar_vod", {"url": "https://www.twitch.tv/videos/1", "n": 5}) == \
+        "Sacar los 5 mejores momentos del VOD https://www.twitch.tv/videos/1"
+    assert r("clip_ya", {}) == "Hacer un clip ahora mismo"
+    assert r("pausar_caza", {}) == "Pausar la caza automática" and r("reanudar_caza", {}) == "Reanudar la caza automática"
+    assert {h["function"]["name"] for h in agente.HERRAMIENTAS} >= {"marcar_clip", "marcar_subido", "analizar_vod",
+                                                                    "clip_ya", "pausar_caza", "reanudar_caza"}
+
+
+def test_un_error_que_no_es_de_herramientas_no_se_disfraza():
+    import pytest
+
+    def llamar(cfg, mensajes, proveedor=None, modelo=None, herramientas=None):
+        if herramientas:
+            raise ia.ErrorIA("Ningún proveedor respondió. groq: 429 rate limit")
+        return {"texto": "Voy a hacerlo", "proveedor": "x", "modelo": "m", "llamadas": []}
+    with pytest.raises(ia.ErrorIA, match="429"):
+        agente.responder({}, [{"role": "user", "content": "x"}], {}, {}, llamar=llamar)
+
+
+def test_propuesta_con_clip_que_no_existe_vuelve_a_la_ia():
+    llamar, vistas = guion(("", [llamada("marcar_subido", {"nombre": "MAL.mp4"})]),
+                           ("", [llamada("marcar_subido", {"nombre": "BIEN.mp4"})]))
+    validar = lambda nombre, a: None if a.get("nombre") == "BIEN.mp4" else "Ese clip no existe."
+    r = agente.responder({}, [{"role": "user", "content": "x"}], {}, {"marcar_subido": None}, llamar=llamar,
+                         validar=validar)
+    assert [p["args"]["nombre"] for p in r["propuestas"]] == ["BIEN.mp4"]
+    assert "no existe" in vistas[1]["mensajes"][-1]["content"]
+
+
+def test_si_anuncia_una_accion_sin_pedirla_se_le_recuerda_una_vez():
+    llamar, vistas = guion(("Voy a pausar la caza.", []), ("", [llamada("pausar_caza", {})]))
+    r = agente.responder({}, [{"role": "user", "content": "pausa"}], {}, {"pausar_caza": None}, llamar=llamar)
+    assert [p["herramienta"] for p in r["propuestas"]] == ["pausar_caza"]
+    assert "herramienta" in vistas[1]["mensajes"][-1]["content"] and len(vistas) == 2
+
+
+def test_una_respuesta_normal_no_se_repite():
+    llamar, vistas = guion(("Voy a explicarte cómo funciona F9.", []))
+    r = agente.responder({}, [{"role": "user", "content": "¿qué es F9?"}], {}, {"pausar_caza": None}, llamar=llamar)
+    assert r["texto"].startswith("Voy a explicarte") and len(vistas) == 1
+
+
+def test_explicar_que_no_se_puede_no_cuenta_como_anuncio():
+    assert not agente.RE_ANUNCIA.search("El cazador no está en marcha ahora mismo, así que no se puede pausar.")
+    assert agente.RE_ANUNCIA.search("Vale, voy a pausar la caza un momento.")
+
+
+def test_una_explicacion_con_vamos_a_no_es_una_accion():
+    assert not agente.RE_ANUNCIA.search("Vamos a ver cómo mejorar el título de tu clip.")
+    assert agente.RE_ANUNCIA.search("Voy a producir el clip ahora.")
+
+
+def test_otras_formas_de_decir_que_no_acepta_herramientas_caen_a_chat_normal():
+    for msg in ("groq: 400 unsupported parameter: tools", "x: 400 'tool_choice' is not supported"):
+        assert agente._sin_herramientas(ia.ErrorIA(msg))
+    assert not agente._sin_herramientas(ia.ErrorIA("groq: 429 rate limit"))
