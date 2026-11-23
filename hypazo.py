@@ -254,6 +254,26 @@ def _ejecutar(cmd, **kw) -> int:
     return subprocess.call(cmd, cwd=AQUI, **kw)
 
 
+def _leer_recortes() -> dict | None:
+    try:
+        with open(os.path.join(AQUI, "layouts.json"), encoding="utf-8-sig") as f:
+            datos = json.load(f)
+        return datos if isinstance(datos, dict) else None
+    except (OSError, ValueError):
+        return None
+
+
+def _restaurar_recortes(guardados: dict | None) -> None:
+    """Tras el checkout: los recortes del usuario ganan a los que trae la versión nueva (que añade los suyos)."""
+    if not guardados:
+        return
+    ruta = os.path.join(AQUI, "layouts.json")
+    tmp = ruta + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump({**(_leer_recortes() or {}), **guardados}, f, indent=2)
+    os.replace(tmp, ruta)
+
+
 def update(canal: str = "stable") -> int:
     git, uv = herramienta("git"), herramienta("uv")
     if not git or not uv:
@@ -266,7 +286,10 @@ def update(canal: str = "stable") -> int:
         etiquetas = subprocess.run([git, "tag", "--list", "v*", "--sort=-v:refname"], cwd=AQUI,
                                    capture_output=True, text=True).stdout.split()
         destino = etiquetas[0] if etiquetas else "origin/main"
-    if _ejecutar([git, "checkout", "--force", destino]) != 0:
+    recortes = _leer_recortes()          # checkout --force pisaría los recortes ajustados por el usuario
+    ok = _ejecutar([git, "checkout", "--force", destino]) == 0
+    _restaurar_recortes(recortes)
+    if not ok:
         return 1
     # python.exe y no pythonw.exe: uv pregunta cosas al intérprete y pythonw no devuelve nada.
     python = os.path.join(os.path.dirname(sys.executable), "python.exe") if sys.platform == "win32" else sys.executable

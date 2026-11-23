@@ -391,6 +391,39 @@
 
   /* ---------- clips en marcha (Cazar) ---------- */
   .vivos { display: grid; gap: 8px; }
+  .lays { display: grid; gap: 8px; margin: 6px 0 4px; }
+  .lay { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 8px 8px 14px; border: 1px solid var(--edge); border-radius: 12px; }
+  .lay b { font: 600 14px var(--display); min-width: 7ch; }
+  .lay-dato { color: var(--muted); font-size: 12.5px; }
+  .lay-acc { display: flex; gap: 6px; margin-left: auto; }
+  .lay-tipo { font-size: 11.5px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--edge); color: var(--dim); }
+  .lay-tipo.manual { color: var(--cyan); border-color: rgba(63,233,255,.45); }
+  .lay .btn { height: 34px; }
+  .dlg-recorte { width: min(1180px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: auto; overflow-x: hidden; }
+  .rc-barra { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 6px; }
+  .rc-barra input { flex: 1 1 180px; width: auto; } .rc-barra select { width: auto; }
+  .rc-cuerpo { display: grid; grid-template-columns: minmax(0, 1fr) 290px; gap: 18px; align-items: start; }
+  .rc-escena { position: relative; border-radius: 12px; overflow: hidden; background: #05060c; aspect-ratio: 16 / 9; touch-action: none; user-select: none; }
+  .rc-escena img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill; }
+  .rc-escena img:not([src]) { display: none; }
+  .rc-vacio { position: absolute; inset: 0; display: grid; place-items: center; padding: 24px; text-align: center; color: var(--muted); }
+  .rc-caja { position: absolute; box-sizing: border-box; border: 2px solid; cursor: move; outline: none; }
+  .rc-caja.cara { border-color: #ff5d73; background: rgba(255,93,115,.10); }
+  .rc-caja.juego { border-color: #4dff9a; background: rgba(77,255,154,.08); }
+  .rc-caja.activa { border-width: 3px; box-shadow: 0 0 0 9999px rgba(0,0,0,.28); z-index: 2; }
+  .rc-caja:focus-visible { outline: 2px dashed var(--ink); outline-offset: 2px; }
+  .rc-caja span { position: absolute; left: 0; top: 0; padding: 2px 8px; font: 600 11.5px var(--body); color: #04050b; }
+  .rc-caja.cara span { background: #ff5d73; } .rc-caja.juego span { background: #4dff9a; }
+  .rc-caja .asa { position: absolute; right: -7px; bottom: -7px; width: 16px; height: 16px; border-radius: 4px; background: var(--ink); cursor: nwse-resize; }
+  .rc-lado { display: grid; gap: 12px; }
+  .rc-lado canvas { width: 100%; max-width: 270px; aspect-ratio: 9 / 16; border-radius: 12px; border: 1px solid var(--edge); justify-self: center; background: #0b0d16; }
+  .rc-cual { display: flex; gap: 14px; } .rc-cual label { display: flex; align-items: center; gap: 6px; }
+  .rc-num { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .rc-num label { display: grid; gap: 4px; font-size: 12px; color: var(--muted); } .rc-num input { height: 36px; }
+  .rc-check { display: flex; gap: 8px; align-items: flex-start; font-size: 12.5px; color: var(--muted); }
+  .rc-presets { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 12px; color: var(--muted); }
+  .rc-presets .btn { height: 32px; padding: 0 10px; font-size: 12.5px; }
+  @media (max-width: 860px) { .rc-cuerpo { grid-template-columns: 1fr; } }
   .grafica-caja { margin: 6px 0 16px; }
   .grafica { display: block; width: 100%; height: 130px; overflow: visible; }
   .grafica path { fill: none; vector-effect: non-scaling-stroke; }
@@ -844,32 +877,14 @@
         <div class="ok" id="actMsg" role="status"></div>
       </div>
       <div class="glass panel" style="--i:3">
-        <h2 class="titulo">Recortes por streamer (formato split)</h2>
-        <p class="ayuda">ancho:alto:x:y sobre el frame 1920×1080. Se aplican al próximo arranque del cazador.</p>
-        <table>
-          <thead><tr><th>Streamer</th><th>Cara</th><th>Gameplay</th><th><span class="visually-hidden" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)">Acciones</span></th></tr></thead>
-          <tbody id="lays"></tbody>
-        </table>
-        <div class="botones">
-          <button class="btn" id="addLay"><svg class="ic"><use href="#i-plus"/></svg><span>Añadir streamer</span></button>
-          <button class="btn primario" id="saveLay"><svg class="ic"><use href="#i-check"/></svg><span>Guardar recortes</span></button>
-        </div>
-        <div class="ok" id="layMsg" role="status"></div>
-      </div>
-      <div class="glass panel previa" style="--i:4">
         <div class="pulso-cab">
-          <h2 class="titulo">Vista previa del recorte</h2>
-          <div class="botones" style="margin:0">
-            <select id="prevPlat" aria-label="Plataforma de la vista previa" style="width:auto">
-              <option value="twitch">Twitch</option><option value="kick">Kick</option>
-            </select>
-            <button class="btn" id="prevFresco" disabled><svg class="ic"><use href="#i-refresh"/></svg><span>Frame nuevo</span></button>
-          </div>
+          <h2 class="titulo">Recortes por streamer (formato split)</h2>
+          <button class="btn" id="addLay"><svg class="ic"><use href="#i-plus"/></svg><span>Añadir streamer</span></button>
         </div>
-        <p class="ayuda" style="margin-top:10px">Pulsa el ojo de un streamer (tiene que estar en vivo). Rojo = cara (arriba del clip),
-          verde = gameplay (abajo). Si ves algo dentro del rojo que no es la cámara, se colará en el clip: ajusta los números y la previa se redibuja sola.</p>
-        <div class="err" id="prevMsg" role="status" style="color:var(--muted)"></div>
-        <div id="prevBox"></div>
+        <p class="ayuda">Arriba del clip va la cámara y abajo el juego. Pulsa «Ajustar» para moverlos sobre el directo.
+          Al guardar se aplica al siguiente clip, también si estás cazando.</p>
+        <div class="lays" id="lays"></div>
+        <div class="ok" id="layMsg" role="status"></div>
       </div>
       <div class="glass panel proveedores" style="--i:5">
         <div class="pulso-cab">
@@ -945,6 +960,49 @@
 </dialog>
 
 <!-- Editor de un clip: recortar y producir -->
+<dialog id="dlgRecorte" class="dlg-recorte" aria-labelledby="rcTitulo">
+  <div class="pulso-cab">
+    <h2 id="rcTitulo">Ajustar recorte</h2>
+    <button class="btn solo-ic" id="rcCerrar" type="button" aria-label="Cerrar"><svg class="ic"><use href="#i-x"/></svg></button>
+  </div>
+  <div class="rc-barra">
+    <input id="rcCanal" type="text" placeholder="canal del streamer" aria-label="Streamer" list="streamers" spellcheck="false" autocomplete="off">
+    <select id="rcPlat" aria-label="Plataforma"><option value="twitch">Twitch</option><option value="kick">Kick</option></select>
+    <button class="btn" id="rcFrame" type="button"><svg class="ic"><use href="#i-refresh"/></svg><span>Frame del directo</span></button>
+    <button class="btn" id="rcAuto" type="button"><svg class="ic"><use href="#i-sparkle"/></svg><span>Auto-detectar</span></button>
+  </div>
+  <div class="err" id="rcMsg" role="status"></div>
+  <div class="rc-cuerpo">
+    <div class="rc-escena" id="rcEscena">
+      <img id="rcImg" alt="Frame del directo para colocar los recortes">
+      <div class="rc-vacio" id="rcVacio">Escribe el canal y pulsa «Frame del directo» (tiene que estar en vivo, o haberlo estado hace poco).</div>
+      <div class="rc-caja cara" data-k="face" tabindex="0" aria-label="Recorte de la cámara: arrastra para moverlo"><span>Cámara</span><i class="asa" aria-hidden="true"></i></div>
+      <div class="rc-caja juego" data-k="game" tabindex="0" aria-label="Recorte del juego: arrastra para moverlo"><span>Juego</span><i class="asa" aria-hidden="true"></i></div>
+    </div>
+    <div class="rc-lado">
+      <canvas id="rcPrevia" width="270" height="480" aria-label="Así queda el clip vertical"></canvas>
+      <div class="rc-cual" role="radiogroup" aria-label="Qué recorte editas">
+        <label><input type="radio" name="rcCual" value="face" checked> Cámara</label>
+        <label><input type="radio" name="rcCual" value="game"> Juego</label>
+      </div>
+      <div class="rc-num">
+        <label>X <input type="number" id="rcX" min="0" step="1"></label>
+        <label>Y <input type="number" id="rcY" min="0" step="1"></label>
+        <label>Ancho <input type="number" id="rcW" min="16" step="1"></label>
+        <label>Alto <input type="number" id="rcH" min="16" step="1"></label>
+      </div>
+      <label class="rc-check"><input type="checkbox" id="rcProp" checked> Mantener la proporción del clip (lo que ves es lo que sale)</label>
+      <div class="rc-presets" id="rcPresets"></div>
+      <label class="rc-check"><input type="checkbox" id="rcVigilar"> Si la cámara se mueve, que Hypazo lo recalibre solo</label>
+      <p class="ayuda">Arrastra las cajas o su esquina. Flechas: mover 1 px (Mayús: 10 px). Ctrl + flechas: tamaño.</p>
+    </div>
+  </div>
+  <div class="botones">
+    <button class="btn" id="rcCancelar" type="button">Cancelar</button>
+    <button class="btn primario" id="rcGuardar" type="button"><svg class="ic"><use href="#i-check"/></svg><span>Guardar recorte</span></button>
+  </div>
+</dialog>
+
 <dialog id="editor" aria-labelledby="edTitulo">
   <div class="ed-cab">
     <h2 id="edTitulo"></h2>
@@ -1896,75 +1954,31 @@ $("edProducir").onclick = () => trabajo($("edProducir"), "Produciendo… (~1 min
   { ...edRef, titulo: $("edTitulo2").value.trim(), subtitulos: $("edSubs").checked, estilo: $("edEstilo").value },
   r => `Listo en PARA SUBIR: ${r.nombre}` + (r.palabras ? ` (${r.palabras} palabras)` : ""), edRef.carpeta + "/" + edRef.nombre);
 
-/* ---------- ajustes ---------- */
-function filaLayout(nombre = "", face = "", game = "") {
-  const tr = el("tr");
-  for (const [val, ph, nom] of [[nombre, "canal", "Streamer"], [face, "300:300:60:430", "Recorte de cara"], [game, "1060:1080:430:0", "Recorte de gameplay"]]) {
-    const td = el("td"), i = el("input"); i.type = "text"; i.value = val; i.placeholder = ph; i.spellcheck = false; i.setAttribute("aria-label", nom);
-    td.append(i); tr.append(td);
-  }
-  const td = el("td");
-  const auto = boton("", "sparkle", "Auto");
-  auto.title = "Detectar la cámara automáticamente (el streamer tiene que estar en vivo)";
-  auto.onclick = () => autoCalibrar(tr, auto);
-  const ojo = el("button", "btn solo-ic"); ojo.append(ic("eye"));
-  ojo.title = "Ver el recorte sobre el directo"; ojo.setAttribute("aria-label", "Ver el recorte sobre el directo");
-  ojo.onclick = () => verRecorte(tr, false);
-  const x = el("button", "btn solo-ic"); x.append(ic("x")); x.title = "Quitar fila"; x.setAttribute("aria-label", "Quitar fila");
-  x.onclick = () => tr.remove();
-  td.append(auto, " ", ojo, " ", x); tr.append(td); return tr;
+/* ---------- ajustes: recortes por streamer ---------- */
+let lays = {};
+const medidas = r => { const [w, h, x, y] = String(r || "").split(":").map(Number); return { w, h, x, y }; };
+async function guardarLays(nuevos) {
+  await api("/api/layouts", json("PUT", nuevos));
+  await cargarLayouts();
 }
-
-/* Calibración automática: detecta la cámara, rellena los números y enseña la previa.
-   No guarda: el usuario confirma con «Guardar recortes». */
-async function autoCalibrar(tr, btn) {
-  const inputs = tr.querySelectorAll("input"), canal = inputs[0].value.trim();
-  const msg = $("prevMsg");
-  if (!canal) { msg.style.color = "var(--bad)"; msg.textContent = "Escribe primero el nombre del canal en la fila."; return; }
-  const antes = [...btn.childNodes]; btn.disabled = true; setBtn(btn, null, "Analizando…");
-  msg.style.color = "var(--muted)";
-  msg.textContent = `Analizando el directo de ${canal}… puede tardar hasta un minuto (Twitch pone anuncios al conectar).`;
-  try {
-    const r = await api("/api/auto-calibrar", json("POST", { canal, plataforma: $("prevPlat").value }));
-    inputs[1].value = r.face; inputs[2].value = r.game;
-    await verRecorte(tr, false);
-    msg.style.color = r.aviso ? "var(--warn)" : "var(--ok)";
-    msg.textContent = (r.aviso || `Cámara detectada en ${r.con_cara} de ${r.frames} frames, ajustada a sus bordes.`)
-      + " Revisa la previa y pulsa «Guardar recortes».";
-  } catch (e) { msg.style.color = "var(--bad)"; msg.textContent = e.message; }
-  btn.disabled = false; btn.replaceChildren(...antes);
+function filaLayout(nombre, lay) {
+  const f = el("div", "lay"), cara = medidas(lay.face), juego = medidas(lay.game);
+  f.append(el("b", null, nombre), el("span", "lay-dato", `cámara ${cara.w}×${cara.h} · juego ${juego.w}×${juego.h}`),
+           el("span", "lay-tipo" + (lay.manual ? " manual" : ""), lay.manual ? "ajustado a mano" : "automático"));
+  const ajustar = boton("primario", "pencil", "Ajustar"); ajustar.onclick = () => abrirRecorte(nombre, lay);
+  const quitar = el("button", "btn solo-ic"); quitar.type = "button"; quitar.append(ic("x"));
+  quitar.title = quitar.ariaLabel = `Quitar el recorte de ${nombre}`;
+  quitar.onclick = async () => {
+    if (!confirm(`¿Quitar el recorte de ${nombre}? Sus clips saldrán en formato normal hasta que se calibre otra vez.`)) return;
+    try {
+      const { [nombre]: _fuera, ...resto } = await api("/api/layouts");   // la lista al día, no la de cuando se pintó
+      await guardarLays(resto); aviso("Recorte quitado.");
+    } catch (e) { aviso(e.message, true); }
+  };
+  const acc = el("span", "lay-acc"); acc.append(ajustar, quitar);
+  f.append(acc);
+  return f;
 }
-
-/* Vista previa: frame real + recortes dibujados + como queda el clip. */
-let filaPrevia = null, prevT, prevUrl;
-async function verRecorte(tr, fresco) {
-  const [canal, face, game] = [...tr.querySelectorAll("input")].map(i => i.value.trim());
-  const msg = $("prevMsg"), img = $("prevImg");   // null hasta la primera previa
-  if (!canal) { msg.style.color = "var(--bad)"; msg.textContent = "Pon el nombre del canal en la fila."; return; }
-  for (const f of $("lays").children) f.classList.toggle("activa", f === tr);
-  filaPrevia = tr; $("prevFresco").disabled = false;
-  msg.style.color = "var(--muted)";
-  msg.textContent = !img || fresco ? `Capturando un frame del directo de ${canal}…` : "Redibujando…";
-  const qs = new URLSearchParams({ canal, face, game, plataforma: $("prevPlat").value, fresco: fresco ? "true" : "false" });
-  try {
-    const r = await fetch("/api/preview-recorte?" + qs);
-    if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(typeof j.detail === "string" ? j.detail : "Error " + r.status); }
-    if (prevUrl) URL.revokeObjectURL(prevUrl);
-    prevUrl = URL.createObjectURL(await r.blob());
-    const vista = img || $("prevBox").appendChild(Object.assign(el("img"), { id: "prevImg",
-      alt: "Frame del directo con los recortes dibujados y, a la derecha, cómo queda el clip" }));
-    vista.src = prevUrl;
-    msg.textContent = `${canal}: izquierda = directo con los recortes · derecha = cómo queda el clip.`;
-  } catch (e) { msg.style.color = "var(--bad)"; msg.textContent = e.message; }
-}
-// Al cambiar los numeros de la fila que se esta viendo, redibuja (con el mismo frame).
-$("lays").addEventListener("input", e => {
-  if (!filaPrevia || !filaPrevia.contains(e.target)) return;
-  clearTimeout(prevT); prevT = setTimeout(() => verRecorte(filaPrevia, false), 600);
-});
-$("prevFresco").onclick = () => filaPrevia && verRecorte(filaPrevia, true);
-$("prevPlat").onchange = () => filaPrevia && verRecorte(filaPrevia, true);
-// En Cazar: si eliges split para alguien sin recorte, avisa de que se calibrará solo.
 let conRecorte = new Set();
 function pintarPistaSplit() {
   const canal = $("canal").value.trim().toLowerCase(), p = $("pistaSplit");
@@ -1974,23 +1988,181 @@ function pintarPistaSplit() {
 }
 $("split").addEventListener("change", pintarPistaSplit);
 $("canal").addEventListener("input", pintarPistaSplit);
-
 async function cargarLayouts() {
-  const lays = await api("/api/layouts");
+  lays = await api("/api/layouts");
   conRecorte = new Set(Object.keys(lays)); pintarPistaSplit();
-  $("lays").replaceChildren(...Object.entries(lays).map(([n, l]) => filaLayout(n, l.face, l.game)));
-  $("streamers").replaceChildren(...Object.keys(lays).map(n => Object.assign(el("option"), { value: n })));
+  const nombres = Object.keys(lays).sort();
+  $("lays").replaceChildren(...(nombres.length ? nombres.map(n => filaLayout(n, lays[n]))
+    : [el("div", "vacio", "Aún no hay recortes. Se crean solos al cazar en formato split, o añádelos tú.")]));
+  $("streamers").replaceChildren(...nombres.map(n => Object.assign(el("option"), { value: n })));
 }
-$("addLay").onclick = () => $("lays").append(filaLayout());
-$("saveLay").onclick = async () => {
-  const datos = {};
-  for (const tr of $("lays").children) {
-    const [n, f, g] = [...tr.querySelectorAll("input")].map(i => i.value.trim());
-    if (n) datos[n] = { face: f, game: g };
+$("addLay").onclick = () => abrirRecorte($("canal").value.trim().toLowerCase(), null);
+
+/* ---------- editor visual del recorte: cajas sobre el frame + previa del clip al momento ---------- */
+const PROP = { face: 1080 / 820, game: 1080 / 1100 };      // lo que ocupa cada parte del clip vertical
+const rc = { W: 1920, H: 1080, cajas: null, activa: "face", url: null, hayFrame: false, canalFrame: "" };
+const rcMsg = (txt, tipo) => { const m = $("rcMsg"); m.textContent = txt; m.style.color = tipo ? `var(--${tipo})` : "var(--muted)"; };
+function cajasPorDefecto(W, H) {
+  const cw = Math.round(W * 0.25), ch = Math.round(cw / PROP.face), gw = Math.min(W, Math.round(H * PROP.game));
+  return { face: { x: 0, y: H - ch, w: cw, h: ch }, game: { x: Math.round((W - gw) / 2), y: 0, w: gw, h: H } };
+}
+function ajustar(k, c, ancla) {   // dentro del frame, mínimo 16 px y (si toca) con la proporción del clip
+  let { x, y, w, h } = c;
+  w = Math.max(16, Math.min(Math.round(w), rc.W)); h = Math.max(16, Math.min(Math.round(h), rc.H));
+  if ($("rcProp").checked) {
+    if (ancla === "h") w = Math.round(h * PROP[k]); else h = Math.round(w / PROP[k]);
+    if (h > rc.H) { h = rc.H; w = Math.round(h * PROP[k]); }
+    if (w > rc.W) { w = rc.W; h = Math.round(w / PROP[k]); }
   }
-  const m = $("layMsg");
-  try { const r = await api("/api/layouts", json("PUT", datos)); m.style.color = "var(--ok)"; m.textContent = "Guardado. " + r.nota; await cargarLayouts(); }
-  catch (e) { m.style.color = "var(--bad)"; m.textContent = e.message; }
+  x = Math.max(0, Math.min(Math.round(x), rc.W - w)); y = Math.max(0, Math.min(Math.round(y), rc.H - h));
+  return { x, y, w, h };
+}
+function pintarRecorte() {
+  for (const caja of document.querySelectorAll(".rc-caja")) {
+    const c = rc.cajas[caja.dataset.k];
+    Object.assign(caja.style, { left: c.x / rc.W * 100 + "%", top: c.y / rc.H * 100 + "%",
+                                width: c.w / rc.W * 100 + "%", height: c.h / rc.H * 100 + "%" });
+    caja.classList.toggle("activa", caja.dataset.k === rc.activa);
+    caja.hidden = !rc.hayFrame;
+  }
+  const c = rc.cajas[rc.activa];
+  for (const [id, v] of [["rcX", c.x], ["rcY", c.y], ["rcW", c.w], ["rcH", c.h]]) if (document.activeElement !== $(id)) $(id).value = v;
+  document.querySelector(`input[name=rcCual][value=${rc.activa}]`).checked = true;
+  pintarPreviaClip();
+}
+function pintarPreviaClip() {   // igual que el render: escala hasta cubrir y recorta el centro
+  const cv = $("rcPrevia"), g = cv.getContext("2d"), img = $("rcImg");
+  g.fillStyle = "#0b0d16"; g.fillRect(0, 0, cv.width, cv.height);
+  if (!rc.hayFrame || !img.naturalWidth) return;
+  const fx = img.naturalWidth / rc.W, fy = img.naturalHeight / rc.H;
+  let oy = 0;
+  for (const [k, alto] of [["face", 820], ["game", 1100]]) {
+    const c = rc.cajas[k], tw = cv.width, th = Math.round(cv.width * alto / 1080);
+    const s = Math.max(tw / c.w, th / c.h), sw = tw / s, sh = th / s;
+    g.drawImage(img, (c.x + (c.w - sw) / 2) * fx, (c.y + (c.h - sh) / 2) * fy, sw * fx, sh * fy, 0, oy, tw, th);
+    oy += th;
+  }
+}
+function mover(k, cambio, ancla) { rc.cajas = { ...rc.cajas, [k]: ajustar(k, { ...rc.cajas[k], ...cambio }, ancla) }; pintarRecorte(); }
+async function cargarFrame(fresco) {
+  const canal = $("rcCanal").value.trim().toLowerCase();
+  if (!/^[a-z0-9_][a-z0-9_-]{1,24}$/.test(canal)) { rcMsg("Escribe el nombre del canal (solo letras, números, _ y -).", "bad"); return false; }
+  rcMsg(`Sacando un frame del directo de ${canal}… si Twitch pone anuncios puede tardar hasta un minuto.`);
+  $("rcFrame").disabled = true;
+  try {
+    const r = await fetch("/api/frame?" + new URLSearchParams({ canal, plataforma: $("rcPlat").value, fresco: fresco ? "true" : "false" }));
+    if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(typeof j.detail === "string" ? j.detail : "Error " + r.status); }
+    const W = +r.headers.get("X-Ancho") || 1920, H = +r.headers.get("X-Alto") || 1080, viejo = r.headers.get("X-Viejo");
+    const url = URL.createObjectURL(await r.blob());
+    await new Promise((ok, mal) => { $("rcImg").onload = ok; $("rcImg").onerror = () => mal(new Error("No pude abrir el frame.")); $("rcImg").src = url; });
+    if (rc.url) URL.revokeObjectURL(rc.url);
+    const otroTamano = W !== rc.W || H !== rc.H;
+    Object.assign(rc, { url, W, H, hayFrame: true, canalFrame: canal });
+    $("rcVacio").hidden = true;
+    if (otroTamano && rc.nuevo) rc.cajas = cajasPorDefecto(W, H);   // recorte nuevo: proporcional al frame real
+    const firma = () => ["face", "game"].map(k => ["x", "y", "w", "h"].map(p => rc.cajas[k][p]).join()).join("|");
+    const antes = firma(), eraNuevo = rc.nuevo;
+    rc.cajas = { face: ajustar("face", rc.cajas.face), game: ajustar("game", rc.cajas.game) };
+    rc.nuevo = false;
+    const movido = !eraNuevo && firma() !== antes;
+    pintarRecorte();
+    const txt = viejo != null ? `${canal} no está en vivo: uso su último frame (de hace ${Math.max(1, Math.round(viejo / 60))} min).`
+                              : `Frame de ${canal} (${W}×${H}). Mueve las cajas y mira cómo queda el clip.`;
+    rcMsg((movido ? `Este directo se ve a ${W}×${H} y el recorte guardado no cabía: lo he encajado, revísalo antes de guardar. ` : "") + txt,
+          movido || viejo != null ? "warn" : null);
+    return true;
+  } catch (e) { rcMsg(e.message, "bad"); return false; }
+  finally { $("rcFrame").disabled = false; }
+}
+function pintarPresets() {
+  const caja = $("rcPresets"), b = (txt, fn, titulo) => { const x = el("button", "btn", txt); x.type = "button"; x.title = titulo; x.onclick = fn; return x; };
+  const esquina = (dx, dy) => () => { rc.activa = "face"; const c = rc.cajas.face; mover("face", { x: dx ? rc.W - c.w : 0, y: dy ? rc.H - c.h : 0 }); };
+  const sinCamara = () => {   // el hueco más grande al lado de la cámara, a toda altura
+    const f = rc.cajas.face, izq = f.x, der = rc.W - f.x - f.w;
+    const w = Math.min(Math.max(izq, der), Math.round(rc.H * PROP.game)) || Math.round(rc.H * PROP.game);
+    rc.activa = "game"; mover("game", { x: der >= izq ? rc.W - w : 0, y: 0, w, h: rc.H }, "h");
+  };
+  caja.replaceChildren(el("span", null, "Cámara en la esquina:"), b("↖", esquina(0, 0), "Arriba a la izquierda"),
+    b("↗", esquina(1, 0), "Arriba a la derecha"), b("↙", esquina(0, 1), "Abajo a la izquierda"), b("↘", esquina(1, 1), "Abajo a la derecha"),
+    el("span", null, "Juego:"), b("Centro", () => { rc.activa = "game"; const w = Math.round(rc.H * PROP.game); mover("game", { x: (rc.W - w) / 2, y: 0, w, h: rc.H }, "h"); }, "A toda altura en el centro"),
+    b("Sin la cámara", sinCamara, "A toda altura, en el lado donde no está la cámara"));
+}
+async function abrirRecorte(nombre, lay) {
+  $("rcCanal").value = nombre || ""; $("rcVigilar").checked = !!lay && !lay.manual; $("rcProp").checked = true;
+  rc.activa = "face"; rc.hayFrame = false; rc.nuevo = !lay; $("rcVacio").hidden = false; $("rcImg").removeAttribute("src");
+  const marco = /^(\d+)x(\d+)$/.exec((lay && lay.frame) || "");
+  rc.W = marco ? +marco[1] : 1920; rc.H = marco ? +marco[2] : 1080;     // el tamaño de frame con el que se hizo
+  rc.cajas = lay ? { face: medidas(lay.face), game: medidas(lay.game) } : cajasPorDefecto(rc.W, rc.H);
+  if (lay && Object.values(rc.cajas).some(c => [c.x, c.y, c.w, c.h].some(n => !Number.isFinite(n)))) rc.cajas = cajasPorDefecto(rc.W, rc.H);
+  // un recorte con otra forma (p. ej. el automático, ajustado a la cámara) no se deforma solo al abrirlo
+  $("rcProp").checked = !lay || ["face", "game"].every(k => Math.abs(rc.cajas[k].w / rc.cajas[k].h / PROP[k] - 1) < 0.03);
+  rcMsg(""); pintarPresets(); pintarRecorte();
+  $("dlgRecorte").showModal();
+  if (nombre) await cargarFrame(false); else $("rcCanal").focus();
+}
+// arrastrar: mover la caja o, desde su esquina, cambiar el tamaño
+for (const caja of document.querySelectorAll(".rc-caja")) {
+  caja.addEventListener("pointerdown", e => {
+    const k = caja.dataset.k, esquina = e.target.classList.contains("asa"), r = $("rcEscena").getBoundingClientRect();
+    const escala = rc.W / r.width, ini = { ...rc.cajas[k] }, x0 = e.clientX, y0 = e.clientY;
+    rc.activa = k; caja.setPointerCapture(e.pointerId); e.preventDefault(); caja.focus();
+    const mov = ev => {
+      const dx = (ev.clientX - x0) * escala, dy = (ev.clientY - y0) * escala;
+      if (esquina) mover(k, { w: ini.w + dx, h: ini.h + dy }, Math.abs(dy) > Math.abs(dx) ? "h" : "w");
+      else mover(k, { x: ini.x + dx, y: ini.y + dy });
+    };
+    const fin = () => { caja.removeEventListener("pointermove", mov); caja.removeEventListener("pointerup", fin); caja.removeEventListener("pointercancel", fin); };
+    caja.addEventListener("pointermove", mov); caja.addEventListener("pointerup", fin); caja.addEventListener("pointercancel", fin);
+    pintarRecorte();
+  });
+  caja.addEventListener("focus", () => { if (rc.activa !== caja.dataset.k) { rc.activa = caja.dataset.k; pintarRecorte(); } });
+}
+$("dlgRecorte").addEventListener("keydown", e => {
+  if (!e.key.startsWith("Arrow") || /INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName) || !rc.hayFrame) return;
+  e.preventDefault();
+  const paso = e.shiftKey ? 10 : 1, c = rc.cajas[rc.activa];
+  const d = { ArrowLeft: [-paso, 0], ArrowRight: [paso, 0], ArrowUp: [0, -paso], ArrowDown: [0, paso] }[e.key];
+  if (e.ctrlKey || e.metaKey) mover(rc.activa, { w: c.w + d[0] - d[1] }, "w");
+  else mover(rc.activa, { x: c.x + d[0], y: c.y + d[1] });
+});
+for (const r of document.querySelectorAll("input[name=rcCual]")) r.onchange = () => { rc.activa = r.value; pintarRecorte(); };
+for (const [id, campo] of [["rcX", "x"], ["rcY", "y"], ["rcW", "w"], ["rcH", "h"]]) {
+  $(id).addEventListener("change", () => { const v = +$(id).value; if (Number.isFinite(v)) mover(rc.activa, { [campo]: v }, campo === "h" ? "h" : "w"); });
+}
+$("rcProp").onchange = () => { for (const k of ["face", "game"]) rc.cajas[k] = ajustar(k, rc.cajas[k]); pintarRecorte(); };
+$("rcFrame").onclick = () => cargarFrame(true);
+$("rcPlat").onchange = () => $("rcCanal").value.trim() && cargarFrame(true);
+$("rcAuto").onclick = async () => {
+  const canal = $("rcCanal").value.trim().toLowerCase(), b = $("rcAuto");
+  if (!canal) { rcMsg("Escribe primero el canal.", "bad"); return; }
+  b.disabled = true; rcMsg(`Buscando la cámara de ${canal} en el directo… puede tardar hasta un minuto.`);
+  try {
+    const r = await api("/api/auto-calibrar", json("POST", { canal, plataforma: $("rcPlat").value }));
+    await cargarFrame(false);
+    rc.cajas = { face: ajustar("face", medidas(r.face)), game: ajustar("game", medidas(r.game)) };
+    $("rcProp").checked = false;      // el auto ajusta la cámara a sus bordes; no forzar la proporción encima
+    pintarRecorte();
+    rcMsg((r.aviso ? r.aviso + " " : `Cámara encontrada en ${r.con_cara} de ${r.frames} frames. `) + "Corrígelo si hace falta y guarda.", r.aviso ? "warn" : "ok");
+  } catch (e) { rcMsg(e.message, "bad"); }
+  b.disabled = false;
+};
+const cerrarRecorte = () => $("dlgRecorte").close();
+$("rcCerrar").onclick = $("rcCancelar").onclick = cerrarRecorte;
+$("rcGuardar").onclick = async () => {
+  const canal = $("rcCanal").value.trim().toLowerCase();
+  if (!/^[a-z0-9_][a-z0-9_-]{1,24}$/.test(canal)) { rcMsg("Escribe un nombre de canal válido.", "bad"); return; }
+  if (!rc.hayFrame) { rcMsg("Saca antes un frame del directo para comprobar que los recortes caen donde toca.", "bad"); return; }
+  if (rc.canalFrame && rc.canalFrame !== canal) { rcMsg(`El frame es de ${rc.canalFrame}: saca uno de ${canal} antes de guardar.`, "bad"); return; }
+  const cad = c => [c.w, c.h, c.x, c.y].join(":");
+  const nuevo = { face: cad(rc.cajas.face), game: cad(rc.cajas.game), frame: `${rc.W}x${rc.H}`,
+                  ...($("rcVigilar").checked ? {} : { manual: true }) };
+  try {
+    const actuales = await api("/api/layouts");      // por si el cazador calibró otro mientras tanto
+    await guardarLays({ ...actuales, [canal]: nuevo });
+    cerrarRecorte();
+    aviso(corriendo && canalActual.startsWith(canal + " ") ? `Recorte de ${canal} guardado: el siguiente clip ya sale con él.`
+                                                          : `Recorte de ${canal} guardado.`);
+  } catch (e) { rcMsg(e.message, "bad"); }
 };
 async function cargarMarca() {
   const m = await api("/api/marca");

@@ -92,20 +92,39 @@ except (FileNotFoundError, ValueError):
     LAYOUTS = dict(_LAYOUTS_CALIBRADOS)
 
 
+def escribir_json(ruta, datos, intentos=10):
+    """Escritura atómica; en Windows os.replace falla si otro proceso tiene el archivo abierto: reintenta."""
+    import json
+    import time
+    tmp = f"{ruta}.{os.getpid()}.tmp"           # cada proceso su temporal: la app y el cazador no se pisan
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(datos, f, indent=2)
+    for i in range(intentos):
+        try:
+            os.replace(tmp, ruta)
+            return
+        except PermissionError:
+            if i == intentos - 1:
+                os.remove(tmp)
+                raise
+            time.sleep(0.1)
+
+
 def guardar_layout(canal, layout):
-    """Añade/actualiza el recorte de un streamer en layouts.json (escritura atómica)."""
+    """Añade/actualiza el recorte (calibrado solo) de un streamer en layouts.json (escritura atómica).
+    Un recorte ajustado a mano ("manual") no se pisa: devuelve False."""
     import json
     try:
         with open(LAYOUTS_JSON, encoding="utf-8-sig") as f:
             todos = json.load(f)
     except (FileNotFoundError, ValueError):
         todos = dict(LAYOUTS)
+    if (todos.get(canal.lower()) or {}).get("manual"):
+        return False
     todos[canal.lower()] = {"face": layout["face"], "game": layout["game"]}
-    tmp = LAYOUTS_JSON + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(todos, f, indent=2)
-    os.replace(tmp, LAYOUTS_JSON)
+    escribir_json(LAYOUTS_JSON, todos)
     LAYOUTS[canal.lower()] = todos[canal.lower()]
+    return True
 
 
 def cadenas_split(lay):

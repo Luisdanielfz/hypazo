@@ -143,7 +143,10 @@ def auto_layout(canal, plataforma, guardar):
         return False, f"   [calibracion] {e}"
     except RuntimeError:
         return None, ""          # anuncios o aún sin grabación: se reintenta luego
-    guardar(canal, r)
+    if guardar(canal, r) is False:      # el usuario lo ajustó a mano mientras tanto: manda el suyo
+        suyo = recargar_layout(canal, 0.0)[0]
+        if suyo:
+            return suyo, "   [calibracion] Uso tu recorte ajustado a mano en Ajustes."
     extra = f" Ojo: {r['aviso']}" if r["aviso"] else ""
     return ({"face": r["face"], "game": r["game"]},
             f"   [calibracion] Recorte split calibrado solo: cara {r['face']}, juego {r['game']}."
@@ -159,12 +162,35 @@ def vigilar_camara(canal, plataforma, layout, guardar):
         return layout, ""
     if calibrar.es_anuncio(img) or calibrar.cara_dentro(img, layout["face"]):
         return layout, ""
+    if layout.get("manual"):     # lo ajustó el usuario: no se recalibra solo, solo se avisa
+        return layout, ("   [aviso] No veo la cara dentro de tu recorte de la cámara: si el streamer la movió, "
+                        "reajústalo en Ajustes (se aplica al siguiente clip sin parar la caza).")
     nuevo, _msg = auto_layout(canal, plataforma, guardar)
     if nuevo:
         return nuevo, (f"   [calibracion] La cámara se movió: recorte recalibrado solo "
                        f"(cara {nuevo['face']}). Revísalo en Ajustes.")
     return layout, ("   [aviso] No veo la cara dentro del recorte de la cámara: puede que el "
                     "streamer la haya movido o esté en otra escena. Revísalo en Ajustes.")
+
+
+RECARGA_S = 5    # cada cuánto mira el cazador si cambiaron el recorte en Ajustes
+
+
+def recargar_layout(canal, marca):
+    """(recorte nuevo | None, marca): lee layouts.json solo si cambió desde `marca` (su hora de modificación).
+    Así un recorte guardado en Ajustes se aplica al siguiente clip sin parar la caza."""
+    from clipeo import LAYOUTS_JSON
+    try:
+        hora = os.path.getmtime(LAYOUTS_JSON)
+        if hora == marca:
+            return None, marca
+        with open(LAYOUTS_JSON, encoding="utf-8-sig") as f:
+            lay = json.load(f).get(canal.lower())
+    except (OSError, ValueError, AttributeError):
+        return None, marca
+    valido = isinstance(lay, dict) and all(re.fullmatch(r"\d{1,4}:\d{1,4}:\d{1,4}:\d{1,4}", str(lay.get(k, "")))
+                                           for k in ("face", "game"))
+    return (lay if valido else None), hora
 
 
 def linea_base(muestras, actual):
@@ -421,6 +447,7 @@ def main():
     indice = siguiente_indice(carpeta)
     render = Renderizador()                     # los clips se renderizan en segundo plano
     cambios_layout = queue.Queue()              # recalibraciones hechas por el hilo de render
+    marca_lay, ultima_recarga = recargar_layout(a.canal, 0.0)[1], time.time()
     atraso = Atraso()
     try:
         while proc.poll() is None:
@@ -437,6 +464,13 @@ def main():
                 lineas.append((now, linea[:46]))
             while not cambios_layout.empty():
                 layout = cambios_layout.get_nowait()
+            if a.split and now - ultima_recarga >= RECARGA_S:     # ¿cambiaron el recorte en Ajustes?
+                ultima_recarga = now
+                nuevo, marca_lay = recargar_layout(a.canal, marca_lay)
+                if nuevo and nuevo != layout:
+                    layout = nuevo
+                    print(f"   [calibracion] Recorte actualizado desde Ajustes: cara {nuevo['face']}, "
+                          f"juego {nuevo['game']}. Se usa desde el siguiente clip.")
             while msgs and now - msgs[0][0] > VENTANA:
                 msgs.popleft()
             puntaje = sum(p for _, p, _ in msgs)

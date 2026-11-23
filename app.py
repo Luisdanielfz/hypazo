@@ -605,10 +605,25 @@ def validar_layouts(datos):
             raise ValueError(f"Nombre de streamer invalido: {nombre!r}")
         if not isinstance(lay, dict):
             raise ValueError(f"{nombre}: formato invalido.")
+        marco = str(lay.get("frame") or "1920x1080")
+        m = re.fullmatch(r"(\d{3,4})x(\d{3,4})", marco)
+        if not m:
+            raise ValueError(f"{nombre}: tamaño de frame inválido ({marco}).")
+        fw, fh = int(m[1]), int(m[2])
         for k in ("face", "game"):
             if not RE_RECORTE.match(str(lay.get(k, ""))):
                 raise ValueError(f"{nombre}.{k} debe ser w:h:x:y (ej 300:300:60:430)")
+            w, h, x, y = map(int, str(lay[k]).split(":"))
+            parte = "la cara" if k == "face" else "el juego"
+            if w < 16 or h < 16:
+                raise ValueError(f"{nombre}: el recorte de {parte} es demasiado pequeño.")
+            if x + w > fw or y + h > fh:     # ffmpeg fallaría en cada clip
+                raise ValueError(f"{nombre}: el recorte de {parte} se sale del frame ({fw}x{fh}).")
         limpio[nombre.lower()] = {"face": lay["face"], "game": lay["game"]}
+        if lay.get("frame"):
+            limpio[nombre.lower()]["frame"] = marco
+        if lay.get("manual"):          # ajustado a mano: la calibración automática no lo pisa
+            limpio[nombre.lower()]["manual"] = True
     return limpio
 
 
@@ -853,6 +868,41 @@ def auto_calibrar(a: AutoCal):
     return r
 
 
+def _frame_guardado(canal, plataforma):
+    """El último frame que se sacó de ese directo (para ajustar el recorte aunque ya no esté en vivo)."""
+    png = os.path.join(tempfile.gettempdir(), f"clipeo_frame_{plataforma}_{canal}.png")
+    return png if os.path.exists(png) else None
+
+
+@app.get("/api/frame")
+def frame(canal: str, plataforma: Literal["twitch", "kick"] = "twitch", fresco: bool = False):
+    """Frame del directo para el editor visual de recortes. Si no está en vivo, el último guardado
+    (cabecera X-Viejo = segundos que tiene). X-Ancho/X-Alto = tamaño real del frame."""
+    from PIL import Image
+    if not RE_CANAL.match(canal):
+        raise HTTPException(400, "Nombre de canal invalido.")
+    canal, cab = canal.lower(), {"Cache-Control": "no-store"}
+    if fresco:
+        _frames.pop((plataforma, canal), None)
+    sin_frame = HTTPException(404, f"{canal} no está en vivo y no tengo ningún frame suyo guardado. "
+                                   "Prueba cuando esté en directo.")
+    try:
+        png = _frame_en_vivo(canal, plataforma)
+    except Exception:             # offline, anuncios, ffmpeg o cv2: se prueba con el último guardado
+        png = _frame_guardado(canal, plataforma)
+        if not png:
+            raise sin_frame
+        cab["X-Viejo"] = str(int(max(0, time.time() - os.path.getmtime(png))))
+    try:
+        with Image.open(png) as im:
+            im.verify()
+        with Image.open(png) as im:
+            cab["X-Ancho"], cab["X-Alto"] = map(str, im.size)
+    except Exception:             # frame a medio escribir
+        raise sin_frame
+    return FileResponse(png, media_type="image/png", headers=cab)
+
+
 @app.get("/api/preview-recorte")
 def preview_recorte(canal: str, face: str, game: str,
                     plataforma: Literal["twitch", "kick"] = "twitch", fresco: bool = False):
@@ -905,11 +955,12 @@ def put_layouts(datos: dict):
         limpio = validar_layouts(datos)
     except ValueError as e:
         raise HTTPException(400, str(e))
-    tmp = LAYOUTS_JSON + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(limpio, f, indent=2)
-    os.replace(tmp, LAYOUTS_JSON)  # escritura atomica: no deja el json a medias
-    return {"ok": True, "nota": "Se aplica al proximo arranque del cazador."}
+    from clipeo import escribir_json
+    try:
+        escribir_json(LAYOUTS_JSON, limpio)    # atómica y con reintentos (el cazador puede estar leyéndolo)
+    except OSError as e:
+        raise HTTPException(503, f"No pude guardar los recortes (el archivo está ocupado): {e}")
+    return {"ok": True, "nota": "Se aplica al siguiente clip, tambien si el cazador esta en marcha."}
 
 
 # ---------- Revisión del piloto de Hypazo (pestaña Revisar) ----------
