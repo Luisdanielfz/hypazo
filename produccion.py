@@ -30,11 +30,14 @@ import threading
 
 import clipeo
 import cortes
+import efectos
+import voz
 
 MODELO = "small"        # base = mas rapido / peor; small va bien en español en CPU
 PALABRAS_POR_GRUPO = 3
 PAUSA_CORTE = 0.6       # silencio (s) que fuerza grupo nuevo
 OUTRO_SEG = 2.5
+CONTEXTO_SEG = 3.0      # el rótulo de contexto, al empezar el cuerpo del clip
 MARCA_JSON = os.path.join(os.path.dirname(os.path.abspath(__file__)), "marca.json")
 _modelo = None
 
@@ -68,6 +71,7 @@ Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour,
 Style: titulo,Arial,68,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,1,0,0,0,100,100,0,0,3,16,0,8,70,70,120,1
 {sub}
 Style: marca,Arial,38,&H60FFFFFF,&H000000FF,&H80000000,&H00000000,1,0,0,0,100,100,0,0,1,2,0,9,40,40,40,1
+Style: contexto,Arial,50,&H00FFFFFF,&H000000FF,&H00000000,&HA0000000,1,0,0,0,100,100,0,0,3,14,0,2,90,90,760,1
 Style: outro,Arial,76,&H00FFFFFF,&H000000FF,&H00FF4691,&H00000000,1,0,0,0,100,100,0,0,3,22,0,5,80,80,0,1
 
 [Events]
@@ -111,13 +115,17 @@ def _palabra(w, activa, est):
     return w
 
 
-def escribir_ass(palabras, titulo, duracion, path, estilo="amarillo", marca=None):
+def escribir_ass(palabras, titulo, duracion, path, estilo="amarillo", marca=None, contexto=None):
+    """contexto = (ini, fin, texto): rótulo que sitúa la escena, debajo del título."""
     est = ESTILOS.get(estilo, ESTILOS["amarillo"])
     marca = marca or {}
     sub = _ESTILO_BASE.format(n="sub", align=2, ml=60, mr=60, mv=560, **est["sub"])
     filas = []
     if titulo:
         filas.append(f"Dialogue: 1,{_t(0)},{_t(duracion)},titulo,,0,0,0,,{limpiar(titulo).upper()}")
+    if contexto and limpiar(contexto[2]):
+        ini_c, fin_c, texto_c = contexto
+        filas.append(f"Dialogue: 1,{_t(ini_c)},{_t(fin_c)},contexto,,0,0,0,,{{\\fad(200,300)}}{limpiar(texto_c)}")
     handle, outro = limpiar(marca.get("handle", "")), limpiar(marca.get("outro", ""))
     if handle:
         filas.append(f"Dialogue: 2,{_t(0)},{_t(duracion)},marca,,0,0,0,,{handle}")
@@ -153,20 +161,24 @@ def _duracion(path):
     return float(out.stdout.strip())
 
 
+def _audio(path):
+    """Audio mono a 16 kHz en float32. Decodificado con nuestro FFmpeg: el lector interno (PyAV) choca de versión."""
+    import numpy as np
+    raw = subprocess.run(["ffmpeg", "-nostdin", "-loglevel", "error", "-i", path, "-f", "f32le",
+                          "-ac", "1", "-ar", "16000", "-"], capture_output=True, check=True).stdout
+    return np.frombuffer(raw, np.float32)
+
+
 def transcribir(path):
     """[(ini, fin, palabra)] del audio del clip, en español."""
     global _modelo
-    import numpy as np
     from faster_whisper import WhisperModel
     if _modelo is None:   # se carga una vez y se reutiliza (tarda ~10s)
         _modelo = WhisperModel(MODELO, device="cpu", compute_type="int8")
-    # Audio decodificado con nuestro FFmpeg: el lector interno (PyAV) choca de version.
-    raw = subprocess.run(["ffmpeg", "-nostdin", "-loglevel", "error", "-i", path, "-f", "f32le",
-                          "-ac", "1", "-ar", "16000", "-"], capture_output=True, check=True).stdout
-    if not raw:
+    audio = _audio(path)
+    if not len(audio):
         return []
-    segs, _info = _modelo.transcribe(np.frombuffer(raw, np.float32), language="es",
-                                     word_timestamps=True, vad_filter=True)
+    segs, _info = _modelo.transcribe(audio, language="es", word_timestamps=True, vad_filter=True)
     return [(w.start, w.end, w.word.strip()) for s in segs for w in s.words]
 
 
@@ -223,14 +235,42 @@ def _tiene_audio(path):
     return bool(r.stdout.strip())
 
 
-def _filtro_montaje(partes, audio):
-    """filter_complex que pega los tramos [(desde, hasta)] y quema los subtítulos -> [v] y [a]."""
-    trozos, entradas = [], ""
+def _tamano(path):
+    r = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height",
+                        "-of", "csv=p=0", path], capture_output=True, text=True, check=True)
+    ancho, alto = r.stdout.strip().splitlines()[0].split(",")[:2]
+    return int(ancho), int(alto)
+
+
+def _fuentes(origen, filtro, etiqueta, n, partir):
+    """Aplica `filtro` a la entrada y la reparte en n copias (una etiqueta de filtro solo se usa una vez)."""
+    if not filtro:
+        return [], [origen] * n
+    trozos = [f"{origen}{filtro}[{etiqueta}]"]
+    if n == 1:
+        return trozos, [f"[{etiqueta}]"]
+    salidas = [f"[{etiqueta}{k}]" for k in range(n)]
+    trozos.append(f"[{etiqueta}]{partir}={n}{''.join(salidas)}")
+    return trozos, salidas
+
+
+def _filtro_montaje(partes, audio, video_pre="", golpe=""):
+    """filter_complex: efectos sobre el clip entero, luego pega los tramos [(desde, hasta)] y quema los
+    subtítulos -> [v] y [a]."""
+    n, trozos, entradas = len(partes), [], ""
+    t_v, fv = _fuentes("[0:v]", f"setpts=PTS-STARTPTS,{video_pre}" if video_pre else "", "vz", n, "split")
+    trozos += t_v
+    fa = ["[0:a]"] * n
+    if audio and golpe:
+        trozos.append(f"{golpe}[g]")
+        t_a, fa = _fuentes("[0:a]", "asetpts=PTS-STARTPTS[a0];[a0][g]amix=inputs=2:duration=first:normalize=0,alimiter=limit=0.95:level=disabled",
+                           "az", n, "asplit")
+        trozos += t_a
     for k, (a, b) in enumerate(partes):
-        trozos.append(f"[0:v]trim=start={a:.3f}:end={b:.3f},setpts=PTS-STARTPTS[v{k}]")
+        trozos.append(f"{fv[k]}trim=start={a:.3f}:end={b:.3f},setpts=PTS-STARTPTS[v{k}]")
         entradas += f"[v{k}]"
         if audio:
-            trozos.append(f"[0:a]atrim=start={a:.3f}:end={b:.3f},asetpts=PTS-STARTPTS[a{k}]")
+            trozos.append(f"{fa[k]}atrim=start={a:.3f}:end={b:.3f},asetpts=PTS-STARTPTS[a{k}]")
             entradas += f"[a{k}]"
     salida = "[m][a]" if audio else "[m]"
     trozos.append(f"{entradas}concat=n={len(partes)}:v=1:a={int(audio)}{salida}")
@@ -239,16 +279,19 @@ def _filtro_montaje(partes, audio):
 
 
 def producir(src, titulo="", subtitulos=True, estilo="amarillo", marca=None, out=None, aviso=None,
-             ajustar=False, cold_open=False, remate=7.0):
+             ajustar=False, cold_open=False, remate=7.0, zoom=False, golpe=False, contexto="",
+             solo_streamer=False, perfil=None):
     """Crea el clip para TikTok en `out` (por defecto <src>_tiktok.mp4).
     ajustar: empezar en una frase (cortes.inicio); cold_open: abrir con el momento. El pico del chat está
-    `remate` segundos antes del final (None = no se sabe: ni corte ni cold open). aviso(paso, pct=None), si se da,
-    recibe en qué paso va.
-    Devuelve (ruta, n_palabras, {"inicio": s, "cold_open": bool})."""
+    `remate` segundos antes del final (None = no se sabe: ni corte, ni cold open, ni zoom, ni golpe).
+    zoom/golpe: efectos.py en el momento; contexto: rótulo que sitúa la escena al empezar el cuerpo.
+    solo_streamer: quita las frases de otras voces (voz.py) con el perfil de voz guardado (o None).
+    aviso(paso, pct=None), si se da, recibe en qué paso va.
+    Devuelve (ruta, n_palabras, {"inicio": s, "cold_open": bool, "zoom": bool, "golpe": bool, "perfil": huella|None})."""
     aviso = aviso or (lambda paso, pct=None: None)
     out = out or src[:-4] + "_tiktok.mp4"
     if remate is None:
-        ajustar = cold_open = False
+        ajustar = cold_open = zoom = golpe = False
     if subtitulos or ajustar:
         aviso("Transcribiendo lo que se dice")
     if subtitulos:
@@ -260,6 +303,13 @@ def producir(src, titulo="", subtitulos=True, estilo="amarillo", marca=None, out
             palabras = []
     else:
         palabras = []
+    nuevo_perfil = None
+    if solo_streamer and palabras:
+        aviso("Separando la voz del streamer")
+        try:                    # si algo falla (sin modelo, sin red), subtítulos con todas las voces, como antes
+            palabras, nuevo_perfil = voz.filtrar(palabras, _audio(src), perfil=perfil)
+        except Exception:
+            nuevo_perfil = None
     tmpdir = tempfile.mkdtemp(prefix="clipeo_")
     try:
         aviso("Poniendo título y subtítulos")
@@ -269,15 +319,20 @@ def producir(src, titulo="", subtitulos=True, estilo="amarillo", marca=None, out
         ini = cortes.inicio(palabras, pico) if ajustar else 0.0
         partes = cortes.tramos(duracion, pico, ini, cold_open)
         total = sum(b - a for a, b in partes)
+        cuerpo = partes[-1][1] - partes[-1][0]
+        rotulo = (total - cuerpo, min(total, total - cuerpo + CONTEXTO_SEG), contexto) if contexto.strip() else None
         escribir_ass(cortes.recolocar(palabras, partes) if subtitulos else [], titulo, total, ass, estilo,
-                     cargar_marca() if marca is None else marca)
+                     cargar_marca() if marca is None else marca, contexto=rotulo)
         tmp_mp4 = os.path.join(tmpdir, "prod.mp4")
         aviso("Montando el vídeo", 0)
-        if partes == [(0.0, duracion)]:
+        audio = _tiene_audio(src)
+        zoom, golpe = zoom and efectos.cabe(pico), golpe and audio and efectos.cabe(pico)
+        if partes == [(0.0, duracion)] and not zoom and not golpe:
             montaje = ["-vf", "ass=prod.ass"]
         else:
-            audio = _tiene_audio(src)
-            montaje = ["-filter_complex", _filtro_montaje(partes, audio), "-map", "[v]"] + (["-map", "[a]"] if audio else [])
+            video_pre = efectos.zoom(pico, *_tamano(src)) if zoom else ""
+            filtro = _filtro_montaje(partes, audio, video_pre, efectos.golpe(pico) if golpe else "")
+            montaje = ["-filter_complex", filtro, "-map", "[v]"] + (["-map", "[a]"] if audio else [])
         # cwd=tmpdir y nombre relativo: evita escapar 'C:' dentro del filtro ass=
         clipeo.con_respaldo(lambda video: _ffmpeg_con_progreso(
             ["ffmpeg", "-nostdin", "-y", "-loglevel", "error", "-i", os.path.abspath(src),
@@ -288,7 +343,8 @@ def producir(src, titulo="", subtitulos=True, estilo="amarillo", marca=None, out
         shutil.move(tmp_mp4, out)   # aparece entero o no aparece
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
-    return out, len(palabras) if subtitulos else 0, {"inicio": float(round(ini, 2)), "cold_open": cold_open}
+    return out, len(palabras) if subtitulos else 0, {"inicio": float(round(ini, 2)), "cold_open": cold_open,
+                                                     "zoom": zoom, "golpe": golpe, "perfil": nuevo_perfil}
 
 
 def main():

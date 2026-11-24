@@ -10,7 +10,7 @@ import threading
 import time
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, ValidationError
 
@@ -89,7 +89,9 @@ class Proveedor(BaseModel):
 
 
 @router.post("/api/ia/proveedor")
-def cambiar_proveedor(p: Proveedor):
+def cambiar_proveedor(p: Proveedor, request: Request):
+    if "hypazo_movil" in request.scope and (p.clave or p.borrar_clave or p.url is not None):
+        raise HTTPException(403, "Las claves y direcciones de la IA solo se cambian desde el PC.")
     cambios = {k: v for k, v in p.model_dump().items() if k != "id" and v is not None}
     try:
         cfg = _guardar(lambda c: {**c, "ia": ia.actualizar(c.get("ia", {}), p.id, cambios)})
@@ -229,7 +231,7 @@ def _producir(a):
     return m.clip_producir(m.Produccion(carpeta=str(a.get("carpeta", "")), nombre=str(a.get("nombre", "")),
                                         titulo=str(a.get("titulo") or "")[:80],
                                         estilo=a.get("estilo") if a.get("estilo") in ("amarillo", "caja", "minimal")
-                                        else "amarillo", ajustar=True))
+                                        else "amarillo", ajustar=True, zoom=True, solo_streamer=True))
 
 
 # Solo tras pulsar Confirmar en el chat. Cada una pasa por el endpoint de siempre (y su validación).

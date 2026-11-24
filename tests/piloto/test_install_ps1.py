@@ -74,7 +74,10 @@ def test_acceso_directo_abre_la_app_sin_consola(tmp_path):
     script = tmp_path / "atajo.ps1"
     script.write_text(f". '{PS1}'\n$script:Codigo='{tmp_path}\hypazo'; $script:Venv=Join-Path $script:Codigo '.venv'\n"
                       f"New-Shortcut '{lnk}'\n$l=(New-Object -ComObject WScript.Shell).CreateShortcut('{lnk}')\n"
-                      "Write-Host \"T=$($l.TargetPath)|A=$($l.Arguments)|I=$($l.IconLocation)\"\n", encoding="utf-8-sig")
+                      "$id=(New-Object -ComObject Shell.Application).NameSpace('" + str(tmp_path) + "').ParseName('Hypazo.lnk')"
+                      ".ExtendedProperty('System.AppUserModel.ID')\n"
+                      "Write-Host \"T=$($l.TargetPath)|A=$($l.Arguments)|I=$($l.IconLocation)|ID=$id\"\n", encoding="utf-8-sig")
     r = subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script)],
                        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120)
     assert "pythonw.exe|A=" in r.stdout and "hypazo.py\" start" in r.stdout and "hypazo.ico" in r.stdout, traza(r)
+    assert "|ID=Hypazo.App" in r.stdout, traza(r)      # la barra de tareas y los avisos la ven como «Hypazo»

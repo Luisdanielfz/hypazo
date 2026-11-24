@@ -46,6 +46,17 @@ Descarga `Hypazo-Setup-<versión>.exe` desde [Releases](https://github.com/Luisd
 
 Los clips se guardan en `Vídeos\Hypazo`. Ni `hypazo update` ni el desinstalador los borran.
 
+## Usar desde el móvil (Android)
+
+En **Ajustes → Conectar el móvil**, enciende la opción y pulsa **Emparejar un móvil**. Después, en la app de Android de Hypazo, pulsa **Escanear QR**.
+
+- **En casa** se conecta por wifi; **fuera de casa**, por [Tailscale](https://tailscale.com), que tiene que estar instalado en el PC y en el móvil.
+- **Seguridad:**
+  - Todo va cifrado, con un certificado propio del PC.
+  - Cada móvil tiene su propio permiso, que se puede quitar desde Ajustes.
+  - Con la opción apagada, nada fuera del PC puede entrar.
+- **Compilar la app:** el código está en [`android/`](android/README.md).
+
 ## Desinstalar
 
 Desde **Configuración → Aplicaciones → Hypazo**, si usaste el `.exe`. Si instalaste por terminal, borra la carpeta `%LOCALAPPDATA%\hypazo`. Tus clips se quedan.
@@ -57,3 +68,8 @@ Hypazo usa la señal **pública** del directo. Cada clip lleva el crédito del c
 ## Licencia
 
 © Hypazo. Todos los derechos reservados. El código es público para que puedas ver qué instalas, pero no se concede permiso para copiarlo, modificarlo ni redistribuirlo.
+
+## Modelos de terceros
+
+- Transcripción: [faster-whisper](https://github.com/SYSTRAN/faster-whisper) con el modelo Whisper `small` de OpenAI (MIT).
+- Subtítulos solo con la voz del streamer: [WeSpeaker](https://github.com/wenet-e2e/wespeaker) ResNet34 entrenado con VoxCeleb ([Wespeaker/wespeaker-voxceleb-resnet34-LM](https://huggingface.co/Wespeaker/wespeaker-voxceleb-resnet34-LM)), licencia [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Se descarga la primera vez que se usa y no se modifica.

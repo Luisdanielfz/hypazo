@@ -279,6 +279,45 @@ function Stage-Setup {
     Invoke-Hypazo @("setup") | Out-Null
 }
 
+# Identidad de la app en Windows (System.AppUserModel.ID) en el acceso directo: la barra de tareas y los avisos
+# muestran "Hypazo" con su icono (no "Scripts" ni el de Python), y fijarla en la barra la abre bien.
+$script:AppIdCsharp = @"
+using System;
+using System.Runtime.InteropServices;
+public static class HypazoAppId {
+    [StructLayout(LayoutKind.Sequential, Pack = 4)] struct PROPERTYKEY { public Guid fmtid; public uint pid; }
+    [StructLayout(LayoutKind.Explicit)] struct PROPVARIANT { [FieldOffset(0)] public ushort vt; [FieldOffset(8)] public IntPtr p; }
+    [ComImport, Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    interface IPropertyStore { void GetCount(out uint c); void GetAt(uint i, out PROPERTYKEY k);
+        void GetValue(ref PROPERTYKEY k, out PROPVARIANT v); void SetValue(ref PROPERTYKEY k, ref PROPVARIANT v); void Commit(); }
+    [ComImport, Guid("0000010b-0000-0000-C000-000000000046"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    interface IPersistFile { void GetClassID(out Guid c); [PreserveSig] int IsDirty();
+        void Load([MarshalAs(UnmanagedType.LPWStr)] string f, uint modo); void Save([MarshalAs(UnmanagedType.LPWStr)] string f, bool recordar);
+        void SaveCompleted([MarshalAs(UnmanagedType.LPWStr)] string f); void GetCurFile(out IntPtr f); }
+    [ComImport, Guid("00021401-0000-0000-C000-000000000046")] class ShellLink { }
+    public static void Poner(string lnk, string id) {
+        object link = new ShellLink();
+        try {
+            ((IPersistFile)link).Load(lnk, 2);
+            PROPERTYKEY k = new PROPERTYKEY { fmtid = new Guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3"), pid = 5 };
+            PROPVARIANT v = new PROPVARIANT { vt = 31, p = Marshal.StringToCoTaskMemUni(id) };
+            try { ((IPropertyStore)link).SetValue(ref k, ref v); ((IPropertyStore)link).Commit(); }
+            finally { Marshal.FreeCoTaskMem(v.p); }
+            ((IPersistFile)link).Save(lnk, true);
+        } finally { Marshal.ReleaseComObject(link); }
+    }
+}
+"@
+
+function Set-AppId([string]$Ruta) {
+    try {
+        if (-not ("HypazoAppId" -as [type])) { Add-Type -TypeDefinition $script:AppIdCsharp }
+        [HypazoAppId]::Poner($Ruta, "Hypazo.App")
+    } catch {
+        Write-Host "   (no pude poner la identidad de Hypazo en el acceso directo: $($_.Exception.Message))" -ForegroundColor DarkGray
+    }
+}
+
 function New-Shortcut([string]$Ruta) {
     $sh = New-Object -ComObject WScript.Shell
     $lnk = $sh.CreateShortcut($Ruta)
@@ -289,6 +328,7 @@ function New-Shortcut([string]$Ruta) {
     $lnk.IconLocation = (Join-Path $script:Codigo "assets\hypazo.ico") + ",0"
     $lnk.Description = "Hypazo: clips de directos de Twitch y Kick"
     $lnk.Save()
+    Set-AppId $Ruta
 }
 
 function Stage-Complete {

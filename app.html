@@ -69,8 +69,12 @@
   </nav>
   <button class="btn asis-abrir" id="abrirAsis" type="button" aria-controls="tab-asistente" aria-expanded="false" title="Asistente (Ctrl+K)">
     <svg class="ic"><use href="#i-bot"/></svg><span>Asistente</span><kbd>Ctrl K</kbd></button>
+  <span class="pill sin-red" id="sinRed" hidden title="Cazar directos, la IA y las actualizaciones necesitan internet. Tus clips, el editor y producir funcionan igual.">
+    <svg class="ic"><use href="#i-info"/></svg>Sin internet</span>
   <span class="pill" id="estado"><span class="dot"></span><span id="estadoTxt">Parado</span></span>
 </header>
+
+<div class="reconecta" id="reconecta" role="status" hidden><span class="giro"></span>Reconectando con el motor de Hypazo…</div>
 
 <main>
   <!-- ===================== CAZAR ===================== -->
@@ -253,6 +257,21 @@
         </div>
         <div class="ok" id="actMsg" role="status"></div>
       </div>
+      <div class="glass panel" style="--i:2" data-solo-pc>
+        <h2 class="titulo">Conectar el móvil</h2>
+        <p class="ayuda">Usa Hypazo desde la app de Android: en casa por wifi y fuera por Tailscale. Va cifrado y cada móvil
+          necesita su propio permiso, que puedes quitar cuando quieras. Apagado, nadie fuera de este PC puede entrar.</p>
+        <label class="check"><input type="checkbox" id="movOn"> <span>Dejar que mis móviles se conecten<br><small id="movRed">Buscando la red…</small></span></label>
+        <div class="botones"><button class="btn primario" id="movPar" type="button" disabled><svg class="ic"><use href="#i-plus"/></svg><span>Emparejar un móvil</span></button></div>
+        <div class="mov-qr" id="movQr" hidden>
+          <div class="mov-qr-img" id="movQrImg"></div>
+          <div><p>En la app Hypazo del móvil pulsa <b>Escanear QR</b> y apunta aquí.</p>
+            <p>Código: <b class="mov-cod" id="movCod"></b></p><p class="ayuda" id="movCaduca"></p>
+            <p class="ayuda">Si lo emparejas tecleando el código, comprueba que el móvil muestra esta huella: <b id="movHuella"></b></p></div>
+        </div>
+        <div class="mov-lista" id="movLista"></div>
+        <div class="ok" id="movMsg" role="status"></div>
+      </div>
       <div class="glass panel" style="--i:3">
         <div class="pulso-cab">
           <h2 class="titulo">Recortes por streamer (formato split)</h2>
@@ -427,8 +446,16 @@
             <label class="check" style="margin:0 0 10px"><input type="checkbox" id="edSubs" checked> Subtítulos automáticos</label>
           </div>
         </div>
+        <label class="check"><input type="checkbox" id="edSoloVoz" checked>
+          <span>Subtítulos solo de la voz del streamer<br><small>sin los diálogos del juego (la primera vez baja un modelo de voz de 26 MB)</small></span></label>
         <label class="check"><input type="checkbox" id="edAjustar" checked>
           <span>Empezar en una frase<br><small>quita el relleno del principio: el clip empieza donde arranca la historia</small></span></label>
+        <label for="edContexto">Rótulo de contexto <small>(sale los 3 primeros segundos; «Sugerir con IA» lo rellena)</small></label>
+        <input type="text" id="edContexto" maxlength="70" placeholder="Ej: Auron intenta duchar a Lucía…">
+        <label class="check"><input type="checkbox" id="edZoom" checked>
+          <span>Zoom en el momento<br><small>la imagen se acerca y tiembla en el pico, como en un vídeo editado a mano</small></span></label>
+        <label class="check"><input type="checkbox" id="edGolpe">
+          <span>Golpe de sonido<br><small>un «boom» grave justo en el momento</small></span></label>
         <label class="check"><input type="checkbox" id="edCold">
           <span>Abrir con el momento<br><small>2,5 s del pico al principio y luego el contexto (engancha desde el primer segundo)</small></span></label>
         <div class="botones"><button class="btn primario" id="edProducir"><svg class="ic"><use href="#i-clapper"/></svg><span>Producir</span></button></div>

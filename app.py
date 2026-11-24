@@ -59,6 +59,8 @@ import api_revision                                      # Clips → Revisar dir
 api_revision.salida = lambda: SALIDA
 api_revision._ruta_clip = lambda carpeta, nombre: ruta_clip(carpeta, nombre)
 app.include_router(api_revision.router)
+import movil                                             # Ajustes → Conectar el móvil (puerto 8766, apagado por defecto)
+app.include_router(movil.router)
 
 # Estado del cazador: uno a la vez.
 _lock = threading.Lock()
@@ -442,18 +444,23 @@ def clips():
         ruta = os.path.join(SALIDA, carpeta)
         if carpeta.startswith("_") or not os.path.isdir(ruta):
             continue
-        mp4 = sorted((f for f in os.listdir(ruta) if f.lower().endswith(".mp4")),
-                     key=lambda f: os.path.getmtime(os.path.join(ruta, f)), reverse=True)
-        if mp4:
+        datos = []
+        for f in os.listdir(ruta):
+            if not f.lower().endswith(".mp4"):
+                continue
+            try:                # el cazador puede renombrar o borrar un vídeo justo ahora: se salta, no falla
+                st = os.stat(os.path.join(ruta, f))
+                datos.append((st.st_mtime, f, st.st_size))
+            except OSError:
+                continue
+        if datos:
             grupos.append({"carpeta": carpeta, "clips": [
                 {"nombre": f, "url": "/salida/" + urllib.parse.quote(f"{carpeta}/{f}"),
-                 "mb": round(os.path.getsize(os.path.join(ruta, f)) / 1e6, 1),
+                 "mb": round(tam / 1e6, 1),
                  # v= cambia si el clip cambia: el navegador puede cachear la miniatura para siempre
-                 "thumb": "/api/miniatura?" + urllib.parse.urlencode(
-                     {"carpeta": carpeta, "nombre": f,
-                      "v": int(os.path.getmtime(os.path.join(ruta, f)))}),
+                 "thumb": "/api/miniatura?" + urllib.parse.urlencode({"carpeta": carpeta, "nombre": f, "v": int(t)}),
                  **_con_prob(_meta(os.path.join(ruta, f)), mods)}
-                for f in mp4]})
+                for t, f, tam in sorted(datos, reverse=True)]})
     return grupos
 
 
@@ -664,6 +671,10 @@ class Produccion(ClipRef):
     estilo: Literal["amarillo", "caja", "minimal"] = "amarillo"
     ajustar: bool = False       # empezar en una frase (cortes.py)
     cold_open: bool = False     # abrir con el momento
+    zoom: bool = False          # efectos.py: zoom con sacudida en el momento
+    golpe: bool = False         # efectos.py: golpe de sonido en el momento
+    contexto: str = Field("", max_length=70)    # rótulo que sitúa la escena
+    solo_streamer: bool = False  # voz.py: subtítulos sin las voces del juego
 
 
 class Marca(BaseModel):
@@ -699,12 +710,24 @@ def clip_producir(p: Produccion):
         raise HTTPException(400, "Este clip ya esta producido. Produce desde el clip original.")
     src = ruta_clip(p.carpeta, p.nombre)
     destino, viejos = ruta_para_subir(src, p.titulo, os.path.join(SALIDA, PARA_SUBIR))
+    import voz
+    meta_src = _meta(src)
+    canal = str(meta_src.get("canal") or "").lower() if isinstance(meta_src, dict) else ""
+    voces = os.path.join(SALIDA, "_voces.json")         # perfil de voz de cada streamer (solo en este PC)
     if not _lock_prod.acquire(blocking=False):
         raise HTTPException(409, "Ya hay un clip produciendose. Espera a que termine.")
     clave = f"{p.carpeta}/{p.nombre}"
     try:
         out, n, info = producir(src, p.titulo, p.subtitulos, p.estilo, out=destino, aviso=progreso.avisador(clave),
-                                ajustar=p.ajustar, cold_open=p.cold_open, remate=_remate(src))
+                                ajustar=p.ajustar, cold_open=p.cold_open, remate=_remate(src),
+                                zoom=p.zoom, golpe=p.golpe, contexto=p.contexto, solo_streamer=p.solo_streamer,
+                                perfil=voz.perfil_de(voces, canal) if p.solo_streamer and canal else None)
+        huella = info.pop("perfil", None)
+        if huella is not None and canal:
+            try:                     # con el candado: dos producciones no escriben el archivo a la vez
+                voz.guardar_perfil(voces, canal, huella)
+            except Exception:        # el clip ya está hecho: un perfil que no se guarda no es un error
+                pass
     except subprocess.CalledProcessError as e:
         raise HTTPException(500, "FFmpeg fallo: " + (e.stderr or "")[-300:])
     finally:
@@ -908,5 +931,6 @@ if __name__ == "__main__":
             sys.exit(0)
     threading.Timer(1.5, webbrowser.open, args=(URL,)).start()
     _centinela.vigilar()
+    movil.arrancar_si_activo(app)
     print(f"Clipeo abierto en {URL}  (cierra esta ventana para apagarlo)")
     uvicorn.run(app, host="127.0.0.1", port=PUERTO, log_level="warning")

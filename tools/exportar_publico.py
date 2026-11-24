@@ -15,9 +15,9 @@ EMAIL = "147686231+Luisdanielfz@users.noreply.github.com"
 LISTA_BLANCA = [
     "app.py", "app.html", "audio.py", "autoclip.py", "calibrar.py", "clipeo.py", "codigos.py", "credito.py",
     "envivo.py", "kick.py", "produccion.py", "resumen.py", "revision.py", "sesion.py", "vod.py", "hypazo.py",
-    "sin_consola.py", "cola_render.py", "clips_vivos.py", "ia.py", "textos_clip.py", "api_asistente.py", "api_recortes.py", "api_revision.py", "agente.py", "comunidad.py", "centinela.py", "cortes.py", "aprendizaje.py", "bandeja.py", "progreso.py", "serie_chat.py", "mini.html",
+    "sin_consola.py", "cola_render.py", "clips_vivos.py", "ia.py", "textos_clip.py", "api_asistente.py", "api_recortes.py", "api_revision.py", "agente.py", "comunidad.py", "centinela.py", "cortes.py", "aprendizaje.py", "efectos.py", "voz.py", "movil.py", "bandeja.py", "progreso.py", "serie_chat.py", "mini.html",
     "test_app.py", "layouts.json", "requirements.txt", "VERSION", "Clipeo.bat", "install.ps1", "README.md",
-    "assets", "tests/piloto", "installer", ".github", "tools/exportar_publico.py",
+    "assets", "tests/piloto", "installer", ".github", "tools/exportar_publico.py", "android",
 ]
 GITIGNORE = """# Clips, segmentos y datos de uso: nunca al repositorio
 salida/
@@ -41,7 +41,10 @@ def exportar(destino: str) -> None:
         origen = os.path.join(RAIZ, rel)
         meta = os.path.join(destino, rel)
         if os.path.isdir(origen):
-            shutil.copytree(origen, meta, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+            # android/: sin compilados, sin la ruta local del SDK y sin el almacén de la firma ni sus contraseñas
+            shutil.copytree(origen, meta, ignore=shutil.ignore_patterns(
+                "__pycache__", "*.pyc", "build", ".gradle", ".kotlin", ".idea", "local.properties", "*.jks", "*.keystore",
+                "keystore.properties"))
         else:
             os.makedirs(os.path.dirname(meta), exist_ok=True)
             shutil.copy2(origen, meta)

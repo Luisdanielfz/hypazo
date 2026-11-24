@@ -11,12 +11,14 @@ import ia
 from credito import credito_final
 
 MAX_TITULO = 90
+MAX_CONTEXTO = 60
 REDES_TAGS = {"twitch": "#twitchclips", "kick": "#kickclips"}
 
 PROMPT = ("Eres editor de clips virales en español para TikTok, YouTube Shorts y Reels. "
           "Con los datos del clip, propone 3 títulos gancho distintos (máx. 60 caracteres, sin comillas, "
-          "sin inventar hechos que no estén en los datos) y 6 hashtags relevantes. "
-          'Responde SOLO con JSON: {"titulos": ["...", "...", "..."], "hashtags": ["#...", ...]}')
+          "sin inventar hechos que no estén en los datos), 6 hashtags relevantes y una frase de contexto "
+          "(máx. 50 caracteres) que sitúe la escena al principio del vídeo sin destripar el remate. "
+          'Responde SOLO con JSON: {"titulos": ["...", "...", "..."], "hashtags": ["#...", ...], "contexto": "..."}')
 
 
 def _tag(texto: str) -> str:
@@ -59,7 +61,8 @@ def basico(meta: dict) -> dict:
     titulos = [f"{nombre} NO SE LO ESPERABA", f"EL MOMENTO MÁS LOCO DE {nombre}",
                f"EL CHAT EXPLOTÓ: {chat[0].upper()}"[:MAX_TITULO] if chat else f"{nombre} EN DIRECTO"]
     tags = _unicos([canal, "clips", REDES_TAGS.get(plat, "#twitchclips"), "parati"])
-    return {"fuente": "basico", "titulos": titulos, "hashtags": tags, "redes": redes(titulos, tags, meta)}
+    return {"fuente": "basico", "titulos": titulos, "hashtags": tags, "redes": redes(titulos, tags, meta),
+            "contexto": ""}
 
 
 def contexto(meta: dict, transcripcion: str = "") -> str:
@@ -91,7 +94,8 @@ def generar(meta: dict, cfg_ia: dict, transcripcion: str = "") -> dict:
         base = basico(meta)
         tags = tags or base["hashtags"]
         return {"fuente": "ia", "proveedor": r["proveedor"], "modelo": r["modelo"], "titulos": titulos,
-                "hashtags": tags, "redes": redes(titulos, tags, meta)}
+                "hashtags": tags, "redes": redes(titulos, tags, meta),
+                "contexto": " ".join(str(datos.get("contexto") or "").split())[:MAX_CONTEXTO]}
     except ia.ErrorIA as e:
         return {**basico(meta), "aviso": str(e)}
     except (ValueError, TypeError, AttributeError):

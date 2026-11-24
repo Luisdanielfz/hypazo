@@ -83,18 +83,114 @@ def salidas_sin_consola() -> None:
     sys.stderr = sys.stderr or registro
 
 
+AUMID = "Hypazo.App"     # identidad de la app en Windows: nombre e icono en la barra de tareas y en los avisos
+FONDO = "#04050b"        # el fondo de la interfaz: la ventana nace oscura, sin destello blanco
+
+
+def _ico() -> str:
+    return os.path.join(AQUI, "assets", "hypazo.ico")
+
+
+def identidad(fijar=None, reg=None) -> None:
+    """Que Windows muestre «Hypazo» con su icono (no «Scripts» ni el de Python, que es quien la ejecuta).
+    Registro solo en el usuario (HKCU), sin permisos de administrador; el desinstalador lo quita."""
+    if fijar is None and reg is None and os.environ.get("HYPAZO_SIN_IDENTIDAD"):
+        return                                  # pruebas: no tocar el registro del PC
+    try:
+        if fijar is None:
+            import ctypes
+            fijar = ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID
+        fijar(AUMID)
+        if reg is None:
+            import winreg as reg
+        clave = reg.CreateKey(reg.HKEY_CURRENT_USER, rf"Software\Classes\AppUserModelId\{AUMID}")
+        try:
+            reg.SetValueEx(clave, "DisplayName", 0, reg.REG_SZ, "Hypazo")
+            reg.SetValueEx(clave, "IconUri", 0, reg.REG_SZ, _ico())
+        finally:
+            reg.CloseKey(clave)
+    except Exception:                           # sin Windows o sin permisos: la app abre igual
+        pass
+
+
+def pagina_espera(url: str) -> str:
+    """Pantalla de Hypazo cuando la interfaz no carga (arrancando, actualizándose...): nunca la de un navegador.
+    Reintenta sola y vuelve a la app en cuanto responde. Todo dentro: no necesita internet."""
+    return """<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Hypazo</title><style>
+html,body{margin:0;height:100%;background:#04050b;color:#e8ecff;font:15px/1.5 "Segoe UI",system-ui,sans-serif}
+body{display:grid;place-items:center;user-select:none}
+.c{text-align:center;max-width:420px;padding:24px}
+svg{width:64px;height:64px}
+h1{font:700 22px "Segoe UI",sans-serif;margin:14px 0 6px;letter-spacing:-.01em}
+p{color:#8b93b8;margin:0}
+.g{width:26px;height:26px;margin:22px auto 0;border:3px solid rgba(63,233,255,.2);border-top-color:#3fe9ff;
+border-radius:50%;animation:g 1s linear infinite}
+@keyframes g{to{transform:rotate(360deg)}}
+</style></head><body><div class="c">
+<svg viewBox="0 0 32 32" aria-hidden="true"><defs><linearGradient id="gl" x1="0" y1="0" x2="1" y2="1">
+<stop offset="0" stop-color="#3fe9ff"/><stop offset="1" stop-color="#ff4fd8"/></linearGradient></defs>
+<rect x="3.5" y="6.5" width="25" height="19" rx="6.5" fill="none" stroke="url(#gl)" stroke-width="2.4"/>
+<path d="M13.5 11.8v8.4l7-4.2z" fill="url(#gl)"/></svg>
+<h1>Reconectando con Hypazo…</h1>
+<p>El motor de la app se está poniendo en marcha. En un momento vuelves a tus clips.</p>
+<div class="g"></div>
+<p style="margin-top:22px"><a id="r" href="#" style="color:#3fe9ff;text-decoration:none">Reintentar ahora</a></p></div>
+<script>
+const APP = """ + json.dumps(url) + """;
+async function probar() {
+  try { await fetch(APP + "/assets/app.css", { mode: "no-cors", cache: "no-store" }); location.replace(APP); }
+  catch (e) { setTimeout(probar, 1500); }
+}
+setTimeout(probar, 800);
+document.getElementById("r").onclick = e => { e.preventDefault(); location.replace(APP); };
+</script></body></html>"""
+
+
+# Solo cuando el motor no responde: una descarga o una carga cancelada también «fallan» y no deben tapar la app.
+SIN_MOTOR = {"CannotConnect", "ConnectionReset", "Disconnected", "Timeout", "HostNameNotResolved",
+             "ServerUnreachable"}
+
+
+def proteger(w, url: str) -> bool:
+    """Sustituye la página de error de WebView2 por la de Hypazo. False si no hay WebView2 (no se toca nada)."""
+    try:
+        wv = w.native.browser.webview
+    except AttributeError:
+        return False
+
+    def sin_error_del_navegador(sender, _args=None):
+        try:
+            sender.CoreWebView2.Settings.IsBuiltInErrorPageEnabled = False
+        except Exception:
+            pass
+
+    def al_navegar(sender, args):
+        try:
+            if not args.IsSuccess and str(args.WebErrorStatus) in SIN_MOTOR:
+                sender.CoreWebView2.NavigateToString(pagina_espera(url))
+        except Exception:
+            pass
+    wv.CoreWebView2InitializationCompleted += sin_error_del_navegador
+    if getattr(wv, "CoreWebView2", None) is not None:      # ya estaba listo
+        sin_error_del_navegador(wv)
+    wv.NavigationCompleted += al_navegar
+    return True
+
+
 def ventana(url: str, navegador=webbrowser.open) -> None:
     """Ventana nativa de Windows (WebView2, el motor de Edge) con la interfaz de Hypazo.
     Se bloquea hasta que el usuario la cierra. Sin pywebview o sin WebView2, abre el navegador."""
     bandeja = None
     try:
         import webview
-        w = webview.create_window("Hypazo", url, width=1280, height=860, min_size=(900, 600))
+        w = webview.create_window("Hypazo", url, width=1280, height=860, min_size=(900, 600),
+                                  background_color=FONDO)
+        w.events.shown += lambda: proteger(w, url)
         bandeja = _bandeja(w)
         app = sys.modules.get("app")
         if app is not None:
             app.abrir_mini = _abridor_mini(webview, url)
-        webview.start()
+        webview.start(icon=_ico())
     except Exception:              # pywebview ausente o WebView2 no disponible: que la app siga usable
         navegador(url)
     finally:
@@ -114,8 +210,9 @@ def _abridor_mini(webview, url: str):
                 v.restore()
                 return
             v = webview.create_window("Hypazo mini", url.rstrip("/") + "/mini", width=360, height=210,
-                                      on_top=True, resizable=False)
+                                      on_top=True, resizable=False, background_color=FONDO)
             v.events.closed += lambda: abierta.pop("v", None)
+            v.events.shown += lambda: proteger(v, url)
             abierta["v"] = v
     return abrir
 
@@ -145,6 +242,7 @@ def _servir(puerto: int) -> None:
     import uvicorn
     import app                     # después de fijar CLIPEO_SALIDA: app.py la lee al importarse
     app._centinela.vigilar()       # modo centinela (no hace nada si está apagado en Cazar)
+    app.movil.arrancar_si_activo(app.app)   # Conectar el móvil, si se dejó encendido
     uvicorn.run(app.app, host="127.0.0.1", port=puerto, log_level="warning")
 
 
@@ -158,6 +256,7 @@ def _parar_cazador() -> None:
 
 def start(puerto: int = PUERTO, abrir=ventana, servir=_servir, parar=_parar_cazador) -> int:
     url = f"http://127.0.0.1:{puerto}"
+    identidad()                           # antes de crear ventanas o avisos: Windows la ve como «Hypazo»
     if _puerto_ocupado(puerto):           # ya abierta: otra ventana sobre el mismo servidor
         abrir(url)
         return 0

@@ -57,7 +57,7 @@ function irA(t, animar = true) {
     guardar("tab", t); pintarBarra();
     if (t === "limpieza") cargarLimpieza();
     if (t === "revisar") cargarRevision();
-    if (t === "ajustes") cargarAprendizaje();
+    if (t === "ajustes") { cargarAprendizaje(); cargarMovil(); }
   };
   if (animar && !quieto && document.startViewTransition) document.startViewTransition(hacer).ready.catch(() => {});   // saltada por otra: da igual
   else hacer();
@@ -72,9 +72,11 @@ for (const b of document.querySelectorAll("[role=tab]")) {
 }
 
 /* ---------- cazador ---------- */
+let fallosEstado = 0;
 async function refrescarEstado() {
   try {
     const s = await api("/api/status");
+    fallosEstado = 0; $("reconecta").hidden = true;
     corriendo = s.corriendo; canalActual = s.canal;
     $("estado").classList.toggle("on", corriendo);
     const vodCorriendo = corriendo && s.canal.startsWith("VOD ");
@@ -94,7 +96,10 @@ async function refrescarEstado() {
     pintarEnVivo(s);
     pintarVivos(s.vivos);
     pintarBarra();
-  } catch (e) { $("estadoTxt").textContent = "Sin conexión con la app"; }
+  } catch (e) {     // el motor (servidor local) no responde: aviso discreto; la interfaz sigue ahí
+    $("estadoTxt").textContent = "Reconectando…";
+    if (++fallosEstado >= 2) $("reconecta").hidden = false;
+  }
 }
 
 /* ---------- modo en vivo (Cazar) ---------- */
@@ -817,7 +822,7 @@ function abrirEditor(g, c) {
   if (c.score != null) info.append(chip(["star", "score " + c.score]));
   info.append(...chips(c).map(chip));
   $("edProd").hidden = !!c.producido;
-  $("edTitulo2").value = ""; $("edEstilo").value = leer("estilo", "amarillo");
+  $("edTitulo2").value = ""; $("edContexto").value = ""; $("edEstilo").value = leer("estilo", "amarillo");
   setBtn($("edSugerir"), "sparkle", "Sugerir con IA");
   pintarCorte();
   $("editor").showModal();
@@ -861,14 +866,19 @@ $("edCortar").onclick = () => {
   trabajo($("edCortar"), "Exportando…", "/api/clip/cortar", { ...edRef, ini: a, fin: b }, r => `Corte creado: ${r.nombre}`);
 };
 // Las dos opciones del montaje se recuerdan (la de frase viene marcada; abrir con el momento, no)
-$("edAjustar").checked = leer("edAjustar", "1") === "1"; $("edCold").checked = leer("edCold", "0") === "1";
-for (const id of ["edAjustar", "edCold"]) $(id).addEventListener("change", e => guardar(id, e.target.checked ? "1" : "0"));
+const OPC_MONTAJE = { edAjustar: "1", edCold: "0", edZoom: "1", edGolpe: "0", edSoloVoz: "1" };     // id -> de serie
+for (const [id, def] of Object.entries(OPC_MONTAJE)) {
+  $(id).checked = leer(id, def) === "1";
+  $(id).addEventListener("change", e => guardar(id, e.target.checked ? "1" : "0"));
+}
 const comoQuedo = r => [r.inicio > 0 ? `empieza en el segundo ${Math.round(r.inicio)}`
                           : $("edAjustar").checked ? "sin una frase clara para empezar: entero" : "",
-                        r.cold_open ? "abre con el momento" : ""].filter(Boolean).join(", ");
+                        r.cold_open ? "abre con el momento" : "", r.zoom ? "zoom" : "", r.golpe ? "golpe" : ""]
+                        .filter(Boolean).join(", ");
 $("edProducir").onclick = () => trabajo($("edProducir"), "Produciendo… (~1 min)", "/api/clip/producir",
   { ...edRef, titulo: $("edTitulo2").value.trim(), subtitulos: $("edSubs").checked, estilo: $("edEstilo").value,
-    ajustar: $("edAjustar").checked, cold_open: $("edCold").checked },
+    ajustar: $("edAjustar").checked, cold_open: $("edCold").checked, zoom: $("edZoom").checked,
+    golpe: $("edGolpe").checked, contexto: $("edContexto").value.trim(), solo_streamer: $("edSoloVoz").checked },
   r => `Listo en PARA SUBIR: ${r.nombre}` + (r.palabras ? ` (${r.palabras} palabras)` : "")
        + (comoQuedo(r) ? ` · ${comoQuedo(r)}` : ""), edRef.carpeta + "/" + edRef.nombre);
 
@@ -1185,6 +1195,52 @@ $("actInstalar").onclick = async () => {
   b.disabled = $("actBuscar").disabled = false;
 };
 
+/* ---------- conectar el móvil (Ajustes): solo desde el PC ---------- */
+let movT;
+function pintarMovil(v) {
+  $("movOn").checked = v.activo; $("movPar").disabled = !v.activo;
+  const red = [...v.ips.wifi.map(i => "wifi " + i), ...v.ips.tailscale.map(i => "Tailscale " + i)].join(" · ");
+  $("movRed").textContent = v.error || (red ? `${v.activo ? "Escuchando en" : "Red de este PC:"} ${red} (puerto ${v.puerto})`
+    : "No encuentro la red: conecta el PC al wifi o abre Tailscale.");
+  $("movRed").style.color = v.error ? "var(--bad)" : "";
+  const fecha = t => t ? new Date(t * 1000).toLocaleString("es-ES", { dateStyle: "short", timeStyle: "short" }) : "nunca";
+  $("movLista").replaceChildren(...v.moviles.map(m => {
+    const f = el("div", "mov-fila"), q = el("button", "btn peligro-suave", "Quitar");
+    f.append(el("span", null, m.nombre), el("small", null, "Último uso: " + fecha(m.ultimo)), q);
+    q.type = "button";
+    q.onclick = async () => {
+      if (!confirm(`¿Quitar el permiso a «${m.nombre}»? Tendrá que volver a emparejarse.`)) return;
+      try { pintarMovil(await api("/api/movil/moviles/" + encodeURIComponent(m.id), { method: "DELETE" })); }
+      catch (e) { aviso(e.message, true); }
+    };
+    return f;
+  }));
+  if (!v.activo) { $("movQr").hidden = true; clearInterval(movT); }
+}
+async function cargarMovil() {
+  try { pintarMovil(await api("/api/movil")); } catch (e) { /* en la app del móvil esta tarjeta no existe */ }
+}
+$("movOn").onchange = async () => {
+  try { pintarMovil(await api("/api/movil", json("POST", { activo: $("movOn").checked }))); }
+  catch (e) { aviso(e.message, true); cargarMovil(); }
+};
+$("movPar").onclick = async () => {
+  try {
+    const r = await api("/api/movil/emparejar", { method: "POST" });
+    $("movQrImg").innerHTML = r.qr;   // SVG generado en el PC por segno, sin datos del usuario
+    $("movCod").textContent = r.codigo; $("movHuella").textContent = r.huella; $("movQr").hidden = false;
+    const fin = Date.now() + r.caduca_s * 1000;
+    clearInterval(movT);
+    const tic = () => {
+      const s = Math.round((fin - Date.now()) / 1000);
+      if (s <= 0) { clearInterval(movT); $("movQr").hidden = true; cargarMovil(); return; }
+      $("movCaduca").textContent = `Caduca en ${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")} y solo vale una vez.`;
+      if (s % 5 === 0) cargarMovil();    // aparece en la lista en cuanto el móvil lo canjea
+    };
+    tic(); movT = setInterval(tic, 1000);
+  } catch (e) { aviso(e.message, true); }
+};
+
 /* ---------- preferencias: favoritos y primer uso ---------- */
 let prefs = { favoritos: [], salida: "", ia: { orden: [], proveedores: {} }, catalogo: [] };
 async function cargarPrefs() {
@@ -1342,11 +1398,14 @@ $("edSugerir").onclick = async () => {
   if (edSug.ref !== ref) {
     b.disabled = true; setBtn(b, "sparkle", "Pensando…");
     const parar = seguirProgreso(ref, txt => setBtn(b, "sparkle", txt));
-    try { const t = await api("/api/clip/textos", json("POST", edRef)); edSug = { ref, lista: t.titulos, i: 0 }; }
+    try {
+      const t = await api("/api/clip/textos", json("POST", edRef)); edSug = { ref, lista: t.titulos, i: 0, contexto: t.contexto };
+    }
     catch (e) { $("edErr").textContent = e.message; }
     parar(); setBtn(b, "sparkle", "Sugerir con IA");
     b.disabled = false;
   }
+  if (edSug.ref === ref && edSug.contexto && !$("edContexto").value.trim()) $("edContexto").value = edSug.contexto;
   if (edSug.ref === ref && edSug.lista.length) {
     $("edTitulo2").value = edSug.lista[edSug.i % edSug.lista.length].toUpperCase().slice(0, 80);
     edSug.i++; setBtn(b, "sparkle", "Otro título");
@@ -1669,6 +1728,11 @@ document.addEventListener("keydown", e => {   // Esc cierra el panel (si no hay 
 });
 $("chNueva").onclick = () => { verConvs(false);
  if (enviando) return; convActual = null; pintarConvs(); pintarChat(); $("chTexto").focus(); };
+
+/* ---------- sin internet: la app abre igual; solo avisa de lo que no va ---------- */
+function pintarRed() { $("sinRed").hidden = navigator.onLine !== false; }
+addEventListener("online", pintarRed); addEventListener("offline", pintarRed);
+pintarRed();
 
 /* ---------- arranque ---------- */
 irA([...TABS, ...DE_CLIPS].includes(leer("tab", "cazar")) ? leer("tab", "cazar") : "cazar", false);

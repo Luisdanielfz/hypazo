@@ -87,7 +87,7 @@ def test_mini_ventana_se_crea_una_vez_y_se_reabre():
 
     class V:
         def __init__(self):
-            self.mostrada, self.events = 0, types.SimpleNamespace(closed=Evento())
+            self.mostrada, self.events = 0, types.SimpleNamespace(closed=Evento(), shown=Evento())
 
         def show(self):
             self.mostrada += 1
@@ -106,3 +106,4 @@ def test_mini_ventana_se_crea_una_vez_y_se_reabre():
     abrir()
     abrir()
     assert len(creadas) == 1 and creadas[0][0] == "http://127.0.0.1:8765/mini" and creadas[0][1]["on_top"] is True
+    assert creadas[0][1]["background_color"] == hypazo.FONDO     # también sin destello blanco ni error de navegador

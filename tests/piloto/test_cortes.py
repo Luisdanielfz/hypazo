@@ -72,7 +72,7 @@ def test_producir_sin_opciones_deja_el_clip_entero(tmp_path, monkeypatch):
     _video(tmp_path / "c.mp4", 12)
     monkeypatch.setattr(produccion, "transcribir", lambda src: [])
     out, n, info = produccion.producir(str(tmp_path / "c.mp4"), subtitulos=False, marca={}, out=str(tmp_path / "o.mp4"))
-    assert info == {"inicio": 0.0, "cold_open": False} and abs(produccion._duracion(out) - 12) < 0.3
+    assert info == {"inicio": 0.0, "cold_open": False, "zoom": False, "golpe": False, "perfil": None} and abs(produccion._duracion(out) - 12) < 0.3
 
 
 def test_ultima_palabra_que_se_pasa_unos_ms_no_se_pierde():
@@ -101,7 +101,7 @@ def test_sin_pico_conocido_no_corta_ni_abre_con_el_momento(tmp_path, monkeypatch
     monkeypatch.setattr(produccion, "transcribir", lambda src: _frase(5, "la historia empieza aquí"))
     _o, _n, info = produccion.producir(str(tmp_path / "c.mp4"), subtitulos=False, marca={}, out=str(tmp_path / "o.mp4"),
                                        ajustar=True, cold_open=True, remate=None)
-    assert info == {"inicio": 0.0, "cold_open": False}
+    assert info == {"inicio": 0.0, "cold_open": False, "zoom": False, "golpe": False, "perfil": None}
 
 
 def test_si_whisper_falla_sin_subtitulos_el_clip_sale_igual(tmp_path, monkeypatch):

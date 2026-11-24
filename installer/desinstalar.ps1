@@ -20,6 +20,8 @@ if ($clips) {
 foreach ($d in "hypazo", "pm", "bin", "config") {
     Remove-Item -LiteralPath (Join-Path $casa $d) -Recurse -Force -ErrorAction SilentlyContinue
 }
+# Identidad de la app en Windows (nombre e icono en la barra de tareas y los avisos); la crea hypazo.py.
+Remove-Item -Path "HKCU:\Software\Classes\AppUserModelId\Hypazo.App" -Recurse -Force -ErrorAction SilentlyContinue
 foreach ($lnk in (Join-Path ([Environment]::GetFolderPath("Programs")) "Hypazo.lnk"),
                  (Join-Path ([Environment]::GetFolderPath("Desktop")) "Hypazo.lnk")) {
     Remove-Item -LiteralPath $lnk -Force -ErrorAction SilentlyContinue

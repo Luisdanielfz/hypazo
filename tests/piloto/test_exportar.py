@@ -21,6 +21,9 @@ def test_exportar_solo_lista_blanca(tmp_path):
     assert autor == "Luisdanielfz <147686231+Luisdanielfz@users.noreply.github.com>"
     archivos = subprocess.run(["git", "-C", str(destino), "ls-files"], capture_output=True, text=True).stdout
     assert ".mp4" not in archivos and "__pycache__" not in archivos
+    assert "movil.py" in archivos and "android/app/src/main/java/es/hypazo/movil/MainActivity.kt" in archivos
+    for privado in ("local.properties", "keystore.properties", ".jks", "android/app/build/", "android/.gradle/"):
+        assert privado not in archivos
 
 
 def test_no_sobrescribe(tmp_path):
