@@ -412,9 +412,27 @@ def ruta_clip(carpeta, nombre):
     return ruta
 
 
+import aprendizaje                                      # noqa: E402  (Ajustes → Aprendizaje)
+_aprende = aprendizaje.Aprendizaje(lambda: SALIDA)
+
+
+@app.get("/api/aprendizaje")
+def ver_aprendizaje():
+    """Por streamer (y «todos»): cuántos clips decididos hay, si ya aprendió y cuánto acierta."""
+    mods = _aprende.resumen()
+    orden = sorted(mods, key=lambda c: (c == aprendizaje.TODOS, -mods[c]["n"]))
+    return [{"canal": c, **{k: v for k, v in mods[c].items() if k != "modelo"}} for c in orden]
+
+
+def _con_prob(meta, mods):
+    p = aprendizaje.prob(mods, meta)
+    return {**meta, "prob": p} if p is not None else meta
+
+
 @app.get("/api/clips")
 def clips():
     grupos = []
+    mods = _aprende.resumen()
     # PARA SUBIR arriba, SUBIDOS al final; en medio las carpetas con fecha (la mas nueva
     # primero, por el nombre: la hora de modificacion cambia al mover archivos) y luego
     # las que no tienen fecha (p.ej. 'Borrador').
@@ -434,7 +452,7 @@ def clips():
                  "thumb": "/api/miniatura?" + urllib.parse.urlencode(
                      {"carpeta": carpeta, "nombre": f,
                       "v": int(os.path.getmtime(os.path.join(ruta, f)))}),
-                 **_meta(os.path.join(ruta, f))}
+                 **_con_prob(_meta(os.path.join(ruta, f)), mods)}
                 for f in mp4]})
     return grupos
 
@@ -593,11 +611,24 @@ def limpieza_hacer(l: Limpiar):
         for _d, ruta in items:
             shutil.rmtree(ruta, ignore_errors=True)
     elif l.categoria == "papelera":
+        try:
+            aprendizaje.archivar_papelera(SALIDA)      # lo aprendido de esos clips no se pierde
+        except OSError as e:
+            raise HTTPException(503, f"No vacié la papelera: no pude guardar lo aprendido de esos clips ({e}).")
         shutil.rmtree(os.path.join(SALIDA, PAPELERA), ignore_errors=True)
     else:
         for carpeta, mp4 in items:
+            if l.categoria == "originales_subidos":
+                _marcar_bueno(mp4)            # lo subiste: para aprender, es un clip que querías
             _a_papelera(mp4, carpeta)
     return {"ok": True, "n": len(items), "mb": mb}
+
+
+def _marcar_bueno(mp4):
+    """Si el clip estaba sin decidir, queda como «bueno» (producirlo o subirlo ya es decidir)."""
+    meta = _meta(mp4)
+    if meta and not meta.get("estado"):
+        _guardar_meta(mp4, {**meta, "estado": "bueno"})
 
 
 @app.post("/api/clip/cortar")
@@ -684,6 +715,7 @@ def clip_producir(p: Produccion):
             for f in (v, v[:-4] + ".json"):
                 if os.path.exists(f):
                     os.remove(f)
+    _marcar_bueno(src)
     meta = {k: v for k, v in _meta(src).items() if k != "estado"}
     _guardar_meta(out, {**meta, "estado": "bueno", "producido": True, "titulo": p.titulo,
                         "estilo": p.estilo, "de": p.nombre, "origen": p.carpeta,

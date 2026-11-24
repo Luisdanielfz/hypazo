@@ -57,6 +57,7 @@ function irA(t, animar = true) {
     guardar("tab", t); pintarBarra();
     if (t === "limpieza") cargarLimpieza();
     if (t === "revisar") cargarRevision();
+    if (t === "ajustes") cargarAprendizaje();
   };
   if (animar && !quieto && document.startViewTransition) document.startViewTransition(hacer).ready.catch(() => {});   // saltada por otra: da igual
   else hacer();
@@ -129,13 +130,13 @@ function pintarSesion() {
   const clips = g ? g.clips.filter(c => /^envivo_\d+\.mp4$/.test(c.nombre))
                      .sort((a, b) => b.nombre.localeCompare(a.nombre, undefined, { numeric: true })).slice(0, 6) : [];
   caja.hidden = !clips.length;
-  const firmaS = clips.map(c => c.nombre + c.score + c.thumb).join();
+  const firmaS = clips.map(c => c.nombre + valor(c) + c.thumb).join();
   if (caja.dataset.firma === firmaS) return;      // sin cambios: no repintar
   caja.dataset.firma = firmaS;
   $("sesionClips").replaceChildren(...clips.map(c => {
     const b = el("button", "mini"); b.title = "Abrir " + c.nombre + " en el editor";
     if (c.thumb) { const i = el("img"); i.src = c.thumb; i.alt = ""; i.loading = "lazy"; b.append(i); }
-    if (c.score != null) b.append(scoreBadge(c.score));
+    if (valor(c) != null) b.append(insignia(c));
     b.append(el("span", "mini-nom", c.nombre.replace(/\.mp4$/, "")));
     b.onclick = () => abrirEditor(g, c);
     return b;
@@ -530,8 +531,9 @@ const visor = new IntersectionObserver(es => {
 
 async function refrescarClips(forzar) {
   const grupos = await api("/api/clips");
-  const f = JSON.stringify(grupos);
-  if (f === firma && !forzar) return;   // sin cambios: no re-renderizar (cortaría el video que ves)
+  // El % aprendido se mueve un poco cada vez que decides un clip: eso solo no repinta (cortaría el video que ves).
+  const f = JSON.stringify(grupos, (k, v) => k === "prob" ? undefined : v);
+  if (f === firma && !forzar) return;   // sin cambios: no re-renderizar
   firma = f; datos = grupos; pintarGaleria();
   const pend = grupos.reduce((n, g) => n + g.clips.filter(c => pasaFiltro(g, c, "pend")).length, 0);
   $("nPend").hidden = !pend; $("nPend").textContent = pend;
@@ -607,6 +609,16 @@ async function accion(url, body, ok) {
 
 const nivel = s => s >= 70 ? " alto" : s >= 50 ? " medio" : "";
 const scoreBadge = s => { const b = el("span", "score" + nivel(s)); b.append(ic("star"), String(s)); b.title = "Score " + s; return b; };
+// Con algo aprendido (Ajustes → Aprendizaje): el % de que te lo quedes manda sobre el score del chat.
+// En un clip ya decidido el % no predice nada (el modelo lo vio): ahí, el score.
+const conProb = c => c.prob != null && !c.estado;
+const valor = c => conProb(c) ? c.prob : c.score;
+function insignia(c) {
+  if (!conProb(c)) return scoreBadge(c.score);
+  const b = el("span", "score" + nivel(c.prob)); b.append(ic("star"), c.prob + "%");
+  b.title = `${c.prob}% de que te lo quedes (aprendido de tus decisiones)` + (c.score != null ? ` · score del chat ${c.score}` : "");
+  return b;
+}
 
 function chips(c) {   // [icono, texto]
   const out = [];
@@ -662,7 +674,7 @@ function tarjeta(g, c, aguja) {
   if (c.thumb) v.dataset.poster = c.thumb;
   v.setAttribute("aria-label", "Clip " + c.nombre); visor.observe(v);
   media.append(v);
-  if (c.score != null) media.append(scoreBadge(c.score));
+  if (valor(c) != null) media.append(insignia(c));
   if (c.producido) { const t = el("span", "tag"); t.append(ic("clapper"), "TikTok"); media.append(t); }
   const cuerpo = el("div", "cuerpo");
   // Terminados: el título dice más que el nombre largo; el nombre, al pasar el ratón.
@@ -740,8 +752,8 @@ function pintarHoy() {
   const dato = (n, txt) => { const d = el("span", "dato"); d.append(el("strong", null, String(n)), " " + txt); return d; };
   const ir = (txt, filtro, icono) => { const b = boton("", icono, txt); b.onclick = () => { $("buscar").value = ""; $("filtro").value = filtro; pintarGaleria(); }; return b; };
   caja.replaceChildren(el("b", null, "Hoy"), dato(deHoy.length, deHoy.length === 1 ? "clip cazado" : "clips cazados"));
-  const mejor = deHoy.filter(([, c]) => c.score != null).sort((a, b) => b[1].score - a[1].score)[0];
-  if (mejor) { const b = boton("primario", "star", `Ver el mejor (${mejor[1].score})`); b.onclick = () => abrirEditor(...mejor); caja.append(b); }
+  const mejor = deHoy.filter(([, c]) => valor(c) != null).sort((a, b) => valor(b[1]) - valor(a[1]))[0];
+  if (mejor) { const b = boton("primario", "star", `Ver el mejor (${conProb(mejor[1]) ? mejor[1].prob + "%" : mejor[1].score})`); b.onclick = () => abrirEditor(...mejor); caja.append(b); }
   if (porRevisar) caja.append(ir(`Revisar ${porRevisar}`, "pend", "eye"));
   if (buenos) caja.append(ir(`Producir ${buenos} buenos`, "bueno", "clapper"));
   if (para) caja.append(ir(`Subir ${para}`, "para", "upload"));
@@ -756,8 +768,8 @@ function pintarGaleria() {
   let mostrados = 0;
   for (const g of datos) {
     let clips = g.clips.filter(c => pasaFiltro(g, c, aguja ? "todos" : filtro) && (!aguja || coincide(g, c, aguja) !== null));
-    // score primero; los clips viejos sin score, por puntaje de chat detrás.
-    if (orden === "reaccion") clips = [...clips].sort((a, b) => ((b.score ?? -1) - (a.score ?? -1)) || ((b.puntaje ?? -1) - (a.puntaje ?? -1)));
+    // % aprendido o score primero; los clips viejos sin score, por puntaje de chat detrás.
+    if (orden === "reaccion") clips = [...clips].sort((a, b) => ((valor(b) ?? -1) - (valor(a) ?? -1)) || ((b.puntaje ?? -1) - (a.puntaje ?? -1)));
     if (!clips.length) continue;
     mostrados += clips.length;
     const esPara = g.carpeta === PARA;
@@ -859,6 +871,28 @@ $("edProducir").onclick = () => trabajo($("edProducir"), "Produciendo… (~1 min
     ajustar: $("edAjustar").checked, cold_open: $("edCold").checked },
   r => `Listo en PARA SUBIR: ${r.nombre}` + (r.palabras ? ` (${r.palabras} palabras)` : "")
        + (comoQuedo(r) ? ` · ${comoQuedo(r)}` : ""), edRef.carpeta + "/" + edRef.nombre);
+
+/* ---------- ajustes: lo que Hypazo ha aprendido de tus decisiones ---------- */
+async function cargarAprendizaje() {
+  const caja = $("aprend");
+  try {
+    const filas = (await api("/api/aprendizaje")).filter(f => f.n);
+    if (!filas.length) {
+      caja.replaceChildren(el("div", "vacio", "Aún no has decidido ningún clip: márcalos como Bueno o Descartar en Clips."));
+      return;
+    }
+    caja.replaceChildren(...filas.map(f => {
+      const fila = el("div", "aprend-fila");
+      const estado = f.activo
+        ? `Aprendido: acierta ${Math.round(f.acierto * 10)} de cada 10 (sin aprender, ${Math.round(f.base * 10)}). Lo que más pesa: ${f.senal}.`
+        : f.falta ? `Faltan ${f.falta} clips decididos (como mínimo 30, con 8 buenos y 8 descartados).`
+        : "Aún no acierta más que sin aprender: sigue decidiendo clips.";
+      fila.append(el("b", null, f.canal === "*" ? "Todos los streamers" : f.canal),
+                  el("small", null, `${f.buenos} buenos · ${f.malos} descartados`), el("span", f.activo ? "listo" : null, estado));
+      return fila;
+    }));
+  } catch (e) { caja.replaceChildren(el("div", "err", e.message)); }
+}
 
 /* ---------- ajustes: recortes por streamer ---------- */
 let lays = {};

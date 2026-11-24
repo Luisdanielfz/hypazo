@@ -85,6 +85,10 @@
   [role=tab][aria-selected=true] { color: var(--ink); background: rgba(63,233,255,.09); }
   [role=tab][aria-selected=true]::after { content: ""; position: absolute; left: 16px; right: 16px; bottom: 4px; height: 2px; border-radius: 2px;
                                           background: var(--cyan); }
+  .aprend-fila { display: grid; grid-template-columns: 170px 170px 1fr; gap: 12px; align-items: baseline; padding: 11px 0;
+                 border-top: 1px solid var(--edge); font-size: 13px; }
+  .aprend-fila small { color: var(--dim); } .aprend-fila .listo { color: var(--ok); }
+  @media (max-width: 720px) { .aprend-fila { grid-template-columns: 1fr; gap: 2px; } }
   .subvistas { display: inline-flex; gap: 4px; padding: 4px; margin: 0 0 18px; max-width: 100%; overflow-x: auto; scrollbar-width: none;
                border-radius: 14px; background: rgba(255,255,255,.03); border: 1px solid var(--edge); }
   .subvistas[hidden] { display: none; }
